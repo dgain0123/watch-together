@@ -48,8 +48,8 @@ async def median_diff(h, v, n=6, gap=0.8):
     return sorted(xs)[len(xs) // 2] if xs else None
 
 async def wait_stable(h, vs, secs=8):
-    await asyncio.sleep(secs)
-    return [await diff_ms(h, v) for v in vs]
+    await asyncio.sleep(max(0, secs - 4))
+    return list(await asyncio.gather(*[median_diff(h, v, n=5, gap=0.8) for v in vs]))
 
 async def main():
     port = free_port()
@@ -61,6 +61,7 @@ async def main():
         async with async_playwright() as pw:
             b = await pw.chromium.launch()  # 預設自動播放規則＝跟手機一樣，沒點過只能靜音播
             mob = {k: v for k, v in pw.devices["iPhone 13"].items() if k != "default_browser_type"}
+            andr = {k: v for k, v in pw.devices["Pixel 5"].items() if k != "default_browser_type"}  # Chrome 觀眾＝Android 流程
             h = await (await b.new_context(**mob)).new_page()
             await h.goto(U + "?host=" + room, wait_until="domcontentloaded")
             await asyncio.sleep(3)
@@ -75,7 +76,7 @@ async def main():
 
             vs = []
             for skew in (3000, -1700):
-                c = await b.new_context(**mob)
+                c = await b.new_context(**andr)
                 await c.add_init_script(f"(()=>{{const D=Date.now.bind(Date);Date.now=()=>D()+({skew});}})()")
                 v = await c.new_page(); await v.goto(U + "?room=" + room, wait_until="domcontentloaded"); vs.append(v)
             for v in vs: await v.click("#tapBtn")
@@ -100,7 +101,7 @@ async def main():
             await asyncio.sleep(2)
             Vs = [await video(v) for v in vs]
             check("全部靜音→舊觀眾都變靜音", all(x["muted"] for x in Vs))
-            nv = await (await b.new_context(**mob)).new_page(); await nv.goto(U + "?room=" + room, wait_until="domcontentloaded")
+            nv = await (await b.new_context(**andr)).new_page(); await nv.goto(U + "?room=" + room, wait_until="domcontentloaded")
             await asyncio.sleep(10)
             N = await video(nv); dn = await diff_ms(h, nv)
             check(f"全部靜音時新觀眾不用點就開始播（靜音、同步 {dn}）",
@@ -138,7 +139,7 @@ async def main():
                 if d2 and 240 < d2[0] < 260: ok = True; break
             check("貼進輸入框就自動開始，觀眾跟著換影片", ok)
             # iPhone 擋住網頁替觀眾按播放 → 拿掉遮罩、提示觀眾直接點影片；點了之後照常同步
-            bp = await (await b.new_context(**mob)).new_page()
+            bp = await (await b.new_context(**andr)).new_page()
             await bp.goto(U + "?room=" + room, wait_until="domcontentloaded")
             await asyncio.sleep(4)
             # 模擬 iOS 12 實測：叫播放沒反應、播放器一直「還沒開始」，但跳轉會讓時間數字跟著變
@@ -160,7 +161,20 @@ async def main():
             wb = await pw.webkit.launch()
             wv = await (await wb.new_context(**mob)).new_page()
             await wv.goto(U + "?room=" + room, wait_until="domcontentloaded"); await asyncio.sleep(4)
-            await wv.tap("#tapBtn")
+            # iPhone 流程：沒有「點我開始觀看」按鈕，一開始就請觀眾直接點影片
+            check("iPhone 觀眾一開始就出現「點一下影片開始一起看」且沒有按鈕遮罩",
+                  await wv.is_visible("#tapHint") and "開始一起看" in await wv.inner_text("#tapHint") and not await wv.is_visible("#tap") and not await wv.is_visible("#shield"))
+            await wv.click("#viewerWrap")  # 觀眾用手指點影片正中間（點進 YouTube 播放器）
+            for _ in range(20):
+                V = await video(wv)
+                if V and not V["paused"] and V["t"] > 0: break
+                await asyncio.sleep(0.5)
+            ok = False
+            for _ in range(6):
+                if not await wv.is_visible("#tapHint") and await wv.is_visible("#shield") and not (await video(wv))["muted"]: ok = True; break
+                await asyncio.sleep(0.5)
+            if not ok: print("  iPhone 診斷:", await wv.is_visible("#tapHint"), await wv.is_visible("#shield"), await video(wv), await wv.evaluate("(()=>{const p=__wt.player;return {st:p.getPlayerState(),dt:__wt.directTap}})()"))
+            check("iPhone 觀眾點了影片→紅框消失、遮罩蓋回、有聲音", ok)
             await asyncio.sleep(12)
             dw = await median_diff(h, wv)
             if dw is None or abs(dw) >= 100:

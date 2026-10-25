@@ -287,8 +287,11 @@ window.addEventListener('error', e => { const el = document.getElementById('err'
 
   // ================= 觀眾 =================
   function startViewer(room) {
+    const ua = navigator.userAgent;
+    const isSafariLike = /iPhone|iPad|iPod/.test(ua) || (/Safari/.test(ua) && !/Chrome|Chromium|Android|Edg/.test(ua));
     $('viewer').classList.remove('hidden');
-    $('tap').classList.remove('hidden');
+    // iPhone：一定要觀眾「自己點影片」才准有聲音（點網頁按鈕不算），所以一開始就請他直接點影片，之後切聲音都不用再點
+    if (!isSafariLike) $('tap').classList.remove('hidden');
     const myId = randId(8);
     let player = null, playerReady = false, unlocked = false, state = null, lastTs = 0;
     let gestured = false; // gestured＝觀眾點過畫面（手機要點過才准出聲音）
@@ -365,18 +368,19 @@ window.addEventListener('error', e => { const el = document.getElementById('err'
       else if (now - stuckSince > 2500 && !directTap) setDirectTap(true);
     }, 500);
     // iPhone／Safari 改播放速度的反應不可預測（沒效或反效果），一開始就只用跳轉校正；其他瀏覽器微調沒效也會自動改用跳轉
-    const ua = navigator.userAgent;
-    const isSafariLike = /iPhone|iPad|iPod/.test(ua) || (/Safari/.test(ua) && !/Chrome|Chromium|Android|Edg/.test(ua));
     let rateWorks = !isSafariLike, rateFails = 0, lastCorr = null;
     function setDirectTap(on) {
       directTap = on;
       // iOS：網頁替觀眾開聲音時會把影片暫停，要觀眾自己點影片才能有聲音播放
-      $('tapHint').innerHTML = state && !state.m
+      $('tapHint').innerHTML = !unlocked
+        ? '👆 請用手指點一下上面影片的正中間<br>開始一起看'
+        : state && !state.m
         ? '🔊 要聽到聲音<br>請用手指點一下上面影片的正中間'
         : '👆 影片沒有自動開始<br>請用手指點一下上面影片的正中間';
       $('shield').classList.toggle('off', on);
       $('tapHint').classList.toggle('hidden', !on);
     }
+    if (isSafariLike) setDirectTap(true); // iPhone 一開始就請觀眾直接點影片
     function nearestRate(target, base) {
       const list = (player.getAvailablePlaybackRates && player.getAvailablePlaybackRates()) || [];
       let best = null;
@@ -422,14 +426,14 @@ window.addEventListener('error', e => { const el = document.getElementById('err'
       if (state && state.end) return;
       const hostMute = !!(state && state.m);
       const wantMute = hostMute;
-      if (hostMute && !unlocked) { unlocked = true; $('tap').classList.add('hidden'); } // 靜音播放不用點，直接開始
+      if (hostMute && !unlocked && !isSafariLike) { unlocked = true; $('tap').classList.add('hidden'); } // 靜音播放不用點，直接開始（iPhone 除外：要先點影片，之後開聲音才不會被暫停）
       if (!wantMute && !gestured && unlocked) { // 要出聲音但還沒點過 → 請觀眾點一下
         $('tapTitle').textContent = '主持人打開聲音了';
         $('tapBtn').textContent = '點一下聽聲音';
         $('tap').classList.remove('hidden');
       }
       if (!playerReady) return;
-      if (wantMute || !gestured) { if (!player.isMuted()) player.mute(); }
+      if (wantMute || (!gestured && !isSafariLike)) { if (!player.isMuted()) player.mute(); }
       else if (player.isMuted()) { player.unMute(); player.setVolume(100); }
     }
     setInterval(updateSound, 500);
@@ -451,7 +455,7 @@ window.addEventListener('error', e => { const el = document.getElementById('err'
 
     ytReady.then(() => {
       player = new YT.Player('viewerPlayer', {
-        playerVars: Object.assign({}, playerVars, { controls: 1, disablekb: 1, mute: 1 }), // 有播放鍵，觀眾要自己點時看得到；平常被遮罩擋住
+        playerVars: Object.assign({}, playerVars, { controls: 1, disablekb: 1, mute: isSafariLike ? 0 : 1 }), // 有播放鍵，觀眾要自己點時看得到；平常被遮罩擋住
         events: {
           onReady: () => { playerReady = true; updateSound(); onState(); },
           onStateChange: e => {

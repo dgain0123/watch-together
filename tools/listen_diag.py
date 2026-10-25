@@ -2,7 +2,9 @@
 import asyncio, json, sys, time
 from playwright.async_api import async_playwright
 SECS = int(sys.argv[1]) if len(sys.argv) > 1 else 600
-HTML = """<script src="https://unpkg.com/mqtt@5.10.1/dist/mqtt.min.js"></script><script>
+import os
+LIB = open(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "lib", "mqtt-4.3.8.min.js"), encoding="utf-8").read()
+HTML = """<script>""" + LIB.replace("</script>", "<\\/script>") + """</script><script>
 for (const u of ['wss://broker.emqx.io:8084/mqtt','wss://broker.hivemq.com:8884/mqtt']) {
   const c = mqtt.connect(u, {clientId:'diag_'+Math.random().toString(36).slice(2)});
   c.on('connect', () => { c.subscribe('dgain0123-watch-together/v1/+/diag'); console.log('connected ' + u); });
