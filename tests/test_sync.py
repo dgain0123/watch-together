@@ -5,7 +5,7 @@ from playwright.async_api import async_playwright
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 VID = "dQw4w9WgXcQ"
-TOL_MS = 60          # 穩定播放時容許誤差
+TOL_MS = 80          # 穩定播放時容許誤差（經公開訊息伺服器對時，去回程不對稱本身就有幾十毫秒誤差）
 fails = []
 def check(name, cond):
     print(("PASS " if cond else "FAIL ") + name, flush=True)
@@ -68,7 +68,9 @@ async def main():
             def on_dialog(dlg):
                 dialogs.append(dlg.message); asyncio.ensure_future(dlg.accept())
             h.on("dialog", on_dialog)
-            await asyncio.sleep(3)
+            for _ in range(30):  # 公開訊息伺服器有時連得慢，最多等 15 秒
+                if "已連線" in await h.inner_text("#hostStatus"): break
+                await asyncio.sleep(0.5)
             check("主持人連上訊息伺服器", "已連線" in await h.inner_text("#hostStatus"))
             # 一鍵貼上並播放：模擬在 YouTube 按「複製連結」的分享文字
             await h.context.grant_permissions(["clipboard-read", "clipboard-write"], origin=U.rstrip("/"))
@@ -83,12 +85,11 @@ async def main():
                 c = await b.new_context(**andr)
                 await c.add_init_script(f"(()=>{{const D=Date.now.bind(Date);Date.now=()=>D()+({skew});}})()")
                 v = await c.new_page(); await v.goto(U + "?room=" + room, wait_until="domcontentloaded"); vs.append(v)
-            for v in vs: await v.click("#tapBtn")
-
+            # 使用者裁示（2026-10-25）：觀眾一律靜音、不用點任何東西就自動開始
             d = await wait_stable(h, vs, 10)
-            check(f"播放同步誤差 < {TOL_MS}ms（時鐘偏 +3s／-1.7s）：{d}", all(x is not None and abs(x) < TOL_MS for x in d))
-            V = await video(vs[0])
-            check("觀眾點過開始後有聲音", V and not V["muted"])
+            check(f"觀眾不用點就自動開始、同步誤差 < {TOL_MS}ms（時鐘偏 +3s／-1.7s）：{d}", all(x is not None and abs(x) < TOL_MS for x in d))
+            Vs = [await video(v) for v in vs]
+            check("觀眾一律靜音", all(x and x["muted"] for x in Vs))
 
             await hf.evaluate("(()=>{const v=document.querySelector('video');v.currentTime+=20})()")
             d = await wait_stable(h, vs, 9)  # 跳轉後偶爾要 6 秒以上才收斂
@@ -99,31 +100,6 @@ async def main():
             Vs = [await video(v) for v in vs]; d = [await diff_ms(h, v) for v in vs]
             check(f"主持人暫停→觀眾也停在同一格：{d}", all(x["paused"] for x in Vs) and all(abs(x) < 50 for x in d))
             hf = await host_play(h)
-
-            # 主持人全部靜音：新觀眾不用點就直接靜音播放；關掉後要點一下才出聲
-            await h.click("#muteAll")
-            await asyncio.sleep(2)
-            Vs = [await video(v) for v in vs]
-            check("全部靜音→舊觀眾都變靜音", all(x["muted"] for x in Vs))
-            nv = await (await b.new_context(**andr)).new_page(); await nv.goto(U + "?room=" + room, wait_until="domcontentloaded")
-            await asyncio.sleep(10)
-            N = await video(nv); dn = await diff_ms(h, nv)
-            check(f"全部靜音時新觀眾不用點就開始播（靜音、同步 {dn}）",
-                  N and not N["paused"] and N["muted"] and not await nv.is_visible("#tap") and dn is not None and abs(dn) < TOL_MS)
-            await h.click("#muteAll")
-            for _ in range(12):  # 公開訊息伺服器偶爾慢到 2 秒以上，最多等 6 秒
-                await asyncio.sleep(0.5)
-                Vs = [await video(v) for v in vs]
-                if all(not x["muted"] for x in Vs) and await nv.is_visible("#tap"): break
-            check("關掉全部靜音→點過的觀眾恢復聲音", all(not x["muted"] for x in Vs))
-            if not await nv.is_visible("#tap"):
-                print("  診斷 nv:", await nv.inner_text("#viewerStatus"), await nv.inner_text("#err"), await video(nv),
-                      await nv.evaluate("(()=>{const p=__wt.player;return {st:p.getPlayerState(),muted:p.isMuted(),dt:__wt.directTap}})()"),
-                      "ended", await nv.is_visible("#ended"), "hint", await nv.is_visible("#tapHint"))
-            check("關掉全部靜音→沒點過的觀眾跳出「點一下聽聲音」", await nv.is_visible("#tap"))
-            await nv.click("#tapBtn"); await asyncio.sleep(1.5)
-            N = await video(nv)
-            check("沒點過的觀眾點一下後有聲音且繼續播", N and not N["muted"] and not N["paused"])
 
             # 全螢幕（模擬 iPhone：沒有真全螢幕功能）
             v = vs[0]
@@ -149,7 +125,9 @@ async def main():
             # 模擬 iOS 12 實測：叫播放沒反應、播放器一直「還沒開始」，但跳轉會讓時間數字跟著變
             await bp.evaluate("""(()=>{const p=__wt.player; window.__o=[p.playVideo,p.seekTo,p.getCurrentTime,p.getPlayerState];
               let fake=0; p.playVideo=()=>{}; p.seekTo=(t)=>{fake=t}; p.getCurrentTime=()=>fake; p.getPlayerState=()=>-1;})()""")
-            await bp.click("#tapBtn")
+            for f in bp.frames:  # 真實情況是影片根本沒開始播：把已經在播的影片真的停住
+                if "youtube.com/embed" in f.url:
+                    await f.evaluate("(()=>{const v=document.querySelector('video'); if(v) v.pause();})()")
             ok = False
             for _ in range(16):
                 await asyncio.sleep(0.5)
@@ -163,48 +141,27 @@ async def main():
                 await asyncio.sleep(0.5)
             await asyncio.sleep(5)
             dd = await median_diff(h, bp)
+            if dd is None or abs(dd) >= TOL_MS:
+                print("  被擋觀眾診斷:", await bp.is_visible("#tapHint"), await bp.is_visible("#shield"), await video(bp),
+                      await bp.evaluate("(()=>{const p=__wt.player;return {st:p.getPlayerState(),ct:p.getCurrentTime(),dt:__wt.directTap}})()"))
             check(f"觀眾自己點影片後遮罩蓋回、照常同步（{dd}）", not await bp.is_visible("#tapHint") and await bp.is_visible("#shield") and dd is not None and abs(dd) < TOL_MS)
 
             # Safari 核心的觀眾（改速度沒效果的那種）也要對得上
             wb = await pw.webkit.launch()
             wv = await (await wb.new_context(**mob)).new_page()
             await wv.goto(U + "?room=" + room, wait_until="domcontentloaded"); await asyncio.sleep(4)
-            # iPhone 流程：沒有「點我開始觀看」按鈕，一開始就請觀眾直接點影片
-            check("iPhone 觀眾一開始就出現「點一下影片開始一起看」且沒有按鈕遮罩",
-                  await wv.is_visible("#tapHint") and "▶ 播放鍵" in await wv.inner_text("#tapHint") and not await wv.is_visible("#tap") and not await wv.is_visible("#shield"))
+            # iPhone（Safari 核心）也不用點就自動靜音播放
             ok = False
-            for _ in range(10):
-                if "1 位 iPhone 觀眾" in await h.inner_text("#hostStatus"): ok = True; break
-                await asyncio.sleep(0.5)
-            check("主持人畫面顯示「有 1 位 iPhone 觀眾要點 ▶」", ok)
-            await wv.click("#viewerWrap")  # 觀眾用手指點影片正中間（點進 YouTube 播放器）
             for _ in range(20):
                 V = await video(wv)
-                if V and not V["paused"] and V["t"] > 0: break
+                if V and not V["paused"] and V["t"] > 0: ok = True; break
                 await asyncio.sleep(0.5)
-            ok = False
-            for _ in range(6):
-                if not await wv.is_visible("#tapHint") and await wv.is_visible("#shield") and not (await video(wv))["muted"]: ok = True; break
-                await asyncio.sleep(0.5)
-            if not ok: print("  iPhone 診斷:", await wv.is_visible("#tapHint"), await wv.is_visible("#shield"), await video(wv), await wv.evaluate("(()=>{const p=__wt.player;return {st:p.getPlayerState(),dt:__wt.directTap}})()"))
-            check("iPhone 觀眾點了影片→紅框消失、遮罩蓋回、有聲音", ok)
-            ok = False
-            for _ in range(10):
-                if "iPhone 觀眾" not in await h.inner_text("#hostStatus"): ok = True; break
-                await asyncio.sleep(0.5)
-            check("iPhone 觀眾點完後主持人畫面的提醒消失", ok)
-            # 主持人從靜音切成有聲音：有 iPhone 觀眾時先跳確認，同一場只問一次
-            await h.click("#muteAll"); await asyncio.sleep(1)   # 有聲音→靜音（不用問）
-            n0 = len(dialogs)
-            await h.click("#muteAll"); await asyncio.sleep(1)   # 靜音→有聲音（要問）
-            await h.click("#muteAll"); await asyncio.sleep(1)
-            await h.click("#muteAll"); await asyncio.sleep(1)   # 第二次靜音→有聲音（不再問）
-            check(f"切成有聲音前跳確認且同一場只問一次（{len(dialogs) - n0} 次）", len(dialogs) - n0 == 1 and "iPhone" in dialogs[-1])
+            check("iPhone 觀眾不用點就自動開始、靜音、沒有紅框", ok and V["muted"] and not await wv.is_visible("#tapHint"))
             await asyncio.sleep(12)
             dw = await median_diff(h, wv)
             if dw is None or abs(dw) >= 100:
                 print("  Safari 觀眾診斷:", await video(wv), await video(h), await wv.inner_text("#viewerStatus"), await wv.inner_text("#err"),
-                      await wv.evaluate("(()=>{const p=__wt.player;return p&&p.getPlayerState?{st:p.getPlayerState(),ct:p.getCurrentTime(),rw:__wt.rateWorks,dt:__wt.directTap}:null})()"), "tap可見", await wv.is_visible("#tap"))
+                      await wv.evaluate("(()=>{const p=__wt.player;return p&&p.getPlayerState?{st:p.getPlayerState(),ct:p.getCurrentTime(),rw:__wt.rateWorks,dt:__wt.directTap}:null})()"), )
             # Safari 只能用跳轉校正（差 0.08 秒以上才跳，太常跳畫面會頓），所以標準放 0.1 秒
             check(f"Safari 核心的觀眾也同步 < 100ms（{dw}）", dw is not None and abs(dw) < 100)
 

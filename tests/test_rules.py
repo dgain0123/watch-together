@@ -11,9 +11,10 @@ def check(name, cond):
 # 程式庫放在自己網站（外部網站偶爾慢到網頁出不來），檔名帶版本
 srcs = re.findall(r'<script src="([^"]+)"', html)
 check("程式庫都放在自己網站且檔名帶版本", len(srcs) == 2 and all(s.startswith("lib/") and re.search(r"-\d+\.\d+\.\d+\.min\.js$", s) and os.path.exists(os.path.join(ROOT, s)) for s in srcs))
-# 使用者裁示（2026-10-25）：靜音只由主持人控制，觀眾端不放靜音按鈕
-check("觀眾端沒有自己的靜音按鈕", "selfMute" not in html and "我要靜音" not in html)
-check("主持人有全部靜音開關", 'id="muteAll"' in html and "m: muteAll" in html)
+# 使用者裁示（2026-10-25 晚）：觀眾一律靜音、不提供開聲音（iOS 12 從靜音切有聲音必暫停，AI 會議確認做不到）
+check("沒有任何開聲音的按鈕（全部靜音開關、自己靜音鈕、點我開始觀看都拿掉）",
+      'id="muteAll"' not in html and "selfMute" not in html and 'id="tapBtn"' not in html and "unMute(" not in html)
+check("觀眾播放器一律靜音載入且持續保持靜音", "mute: 1 }" in html and "function keepMuted" in html)
 # 兩台訊息伺服器同時連，一台掛了還能用
 check("同時連兩台訊息伺服器", html.count("wss://") >= 2)
 check("觀眾有全螢幕按鈕", 'id="fsBtn"' in html and 'id="fsExit"' in html)

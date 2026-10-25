@@ -74,8 +74,7 @@
         <button id="go">播放</button>
       </div>
       <p class="status" id="hostStatus">連線中…</p>
-      <button class="fs-btn" id="muteAll"></button>
-      <p class="hint" id="muteAllHint"></p>
+      <p class="hint">觀眾的影片一律靜音（大家在同一個空間，聲音聽你的手機就好），觀眾掃了就直接開始看。</p>
       <button class="fs-btn danger" id="endShow">⏹ 結束放映（舊 QR code 全部失效）</button>
       <p class="hint" id="endHint"></p>
     </div>
@@ -102,11 +101,6 @@
   <div class="hint">可以關掉這個網頁了。下次放映請重新掃主持人的新 QR code。</div>
 </div>
 
-<div id="tap" class="hidden">
-  <div style="font-size:18px" id="tapTitle">準備好了嗎？</div>
-  <button id="tapBtn">點我開始觀看</button>
-  <div class="hint">手機規定要先點一下才能放出聲音</div>
-</div>
 
 <script src="lib/mqtt-4.3.8.min.js"></script>
 <script src="lib/qrcode-1.0.0.min.js"></script>
@@ -210,22 +204,6 @@ window.addEventListener('error', e => { const el = document.getElementById('err'
     }
     setInterval(refreshStatus, 3000);
 
-    let muteAll = safeGet('wt_mute_all') === '1';
-    function showMuteAll() {
-      $('muteAll').textContent = muteAll ? '🔇 觀眾全部靜音中（按一下讓觀眾有聲音）' : '🔊 觀眾有聲音（按一下讓觀眾全部靜音）';
-      $('muteAllHint').textContent = muteAll ? '只有你的手機出聲音，適合大家在同一個房間。觀眾掃了就直接開始看，不用按任何東西。' : '大家在同一個房間的話，建議打開「觀眾全部靜音」，才不會有回音。';
-    }
-    showMuteAll();
-    let skipSoundConfirm = false;
-    $('muteAll').onclick = () => {
-      // 從靜音切成有聲音：iPhone 觀眾的影片會先停住（蘋果規定），先問主持人
-      let ios = 0; for (const v of viewers.values()) if (v.ios) ios++;
-      if (muteAll && ios && !skipSoundConfirm) {
-        if (!confirm(`切成有聲音時，${ios} 位 iPhone 觀眾的影片會先停住，要他們點一下 ▶ 播放鍵才會帶聲音繼續播（蘋果的規定）。\n\n確定要切換嗎？（這場之後不會再問）`)) return;
-        skipSoundConfirm = true;
-      }
-      muteAll = !muteAll; safeSet('wt_mute_all', muteAll ? '1' : '0'); showMuteAll(); sendState(); };
-
     // 結束放映：通知觀眾結束並斷線，這個房間永久作廢；主持人自動換新房間（新 QR code）
     let ended = false;
     $('endShow').onclick = () => {
@@ -255,7 +233,7 @@ window.addEventListener('error', e => { const el = document.getElementById('err'
       const playing = st === YT.PlayerState.PLAYING;
       const p = pos();
       // 緩衝中＝主持人那邊畫面停住，觀眾也先停在同一格
-      net.publish('state', { v: videoId, s: playing ? 'play' : 'pause', t: p.t, g: p.good, r: player.getPlaybackRate(), m: muteAll, ts: Date.now() }, true);
+      net.publish('state', { v: videoId, s: playing ? 'play' : 'pause', t: p.t, g: p.good, r: player.getPlaybackRate(), ts: Date.now() }, true);
     }
     setInterval(sendState, 500);
 
@@ -301,11 +279,9 @@ window.addEventListener('error', e => { const el = document.getElementById('err'
     const ua = navigator.userAgent;
     const isSafariLike = /iPhone|iPad|iPod/.test(ua) || (/Safari/.test(ua) && !/Chrome|Chromium|Android|Edg/.test(ua));
     $('viewer').classList.remove('hidden');
-    // iPhone：一定要觀眾「自己點影片」才准有聲音（點網頁按鈕不算），所以一開始就請他直接點影片，之後切聲音都不用再點
-    if (!isSafariLike) $('tap').classList.remove('hidden');
     const myId = randId(8);
-    let player = null, playerReady = false, unlocked = false, state = null, lastTs = 0;
-    let gestured = false; // gestured＝觀眾點過畫面（手機要點過才准出聲音）
+    // 2026-10-25 使用者裁示：觀眾一律靜音（不提供開聲音）。手機允許靜音影片自動播放，所以觀眾不用按任何東西
+    let player = null, playerReady = false, unlocked = true, state = null, lastTs = 0;
 
     // --- 對時：問主持人「你現在幾點」，取來回最快的那次算時鐘差 ---
     const pongs = [];
@@ -326,7 +302,6 @@ window.addEventListener('error', e => { const el = document.getElementById('err'
       if (!retained) { offsets.push(msg.ts - Date.now()); if (offsets.length > 30) offsets.shift(); }
       state = msg;
       onState();
-      updateSound();
     }, refreshStatus);
     function sayHello() { net.publish('hello', { id: myId, ios: isSafariLike, waiting: directTap }); }
     setInterval(sayHello, 5000);
@@ -351,7 +326,7 @@ window.addEventListener('error', e => { const el = document.getElementById('err'
       $('ended').classList.toggle('hidden', !(state && state.end));
       if (state && state.end) { // 這個房間永久結束：停播、斷線，之後不會再接上
         try { if (playerReady) player.stopVideo(); } catch (e) {}
-        loadedId = null; setDirectTap(false); $('tap').classList.add('hidden');
+        loadedId = null; setDirectTap(false);
         net.close(); return;
       }
       if (!state || !playerReady || loadedId === state.v) return;
@@ -369,7 +344,7 @@ window.addEventListener('error', e => { const el = document.getElementById('err'
     setInterval(() => {
       let st = null, ct = null, mu = null;
       try { if (playerReady) { st = player.getPlayerState(); ct = Math.round(player.getCurrentTime() * 10) / 10; mu = player.isMuted() ? 1 : 0; } } catch (e) {}
-      trail.push([Math.round((Date.now() % 1e6) / 100) / 10, st, ct, mu, state ? (state.m ? 1 : 0) : null, state ? state.s : null, directTap ? 1 : 0, seekCount]);
+      trail.push([Math.round((Date.now() % 1e6) / 100) / 10, st, ct, mu, null, state ? state.s : null, directTap ? 1 : 0, seekCount]);
       if (trail.length > 20) trail.shift();
     }, 500);
     // 該播卻 2.5 秒都沒前進（不管播放器回報什麼狀態、甚至播放器沒準備好）＝手機擋住了 → 請觀眾直接點影片
@@ -378,9 +353,9 @@ window.addEventListener('error', e => { const el = document.getElementById('err'
       // 要「播放器說在播」而且時間真的往前走才算（網頁自己跳轉也會讓時間變，iOS 12 實測被騙過）
       let ct = -1, st = null; try { if (playerReady) { ct = player.getCurrentTime(); st = player.getPlayerState(); } } catch (e) {}
       const now = Date.now();
-      if (st === 1 && ct > lastCt && lastCt >= 0) {
+      if (st === 1 && ct !== lastCt && lastCt >= 0) { // 播放器說在播＋時間有在變（不要求比之前大：觀眾點下去可能從前面開始播）
         lastCt = ct; stuckSince = 0;
-        if (directTap) { setDirectTap(false); gestured = true; updateSound(); }
+        if (directTap) setDirectTap(false);
         return;
       }
       lastCt = ct;
@@ -392,17 +367,12 @@ window.addEventListener('error', e => { const el = document.getElementById('err'
     function setDirectTap(on) {
       directTap = on;
       // iOS：網頁替觀眾開聲音時會把影片暫停，要觀眾自己點影片才能有聲音播放
-      // 只有點 YouTube 自己的 ▶ 播放鍵才算觀眾的手勢（點我們網頁不算，AI 會議 2026-10-25 結論）
-      $('tapHint').innerHTML = !unlocked
-        ? '👆 請點一下上面影片中間的 ▶ 播放鍵<br>開始一起看'
-        : state && !state.m
-        ? '🔊 主持人開聲音了<br>請點一下上面影片中間的 ▶ 播放鍵，就會有聲音繼續播'
-        : '👆 影片停住了<br>請點一下上面影片中間的 ▶ 播放鍵';
+      // 靜音影片手機通常會自己播；iPhone 省電模式等情況擋住時才請觀眾點 YouTube 自己的 ▶（點我們網頁不算）
+      $('tapHint').innerHTML = '👆 影片沒有自動開始<br>請點一下上面影片中間的 ▶ 播放鍵';
       $('shield').classList.toggle('off', on);
       $('tapHint').classList.toggle('hidden', !on);
       if (typeof sayHello === 'function') sayHello(); // 馬上讓主持人知道誰在等點擊
     }
-    if (isSafariLike) setDirectTap(true); // iPhone 一開始就請觀眾直接點影片
     function nearestRate(target, base) {
       const list = (player.getAvailablePlaybackRates && player.getAvailablePlaybackRates()) || [];
       let best = null;
@@ -444,22 +414,9 @@ window.addEventListener('error', e => { const el = document.getElementById('err'
                  Math.min(4000, Math.abs(d) / Math.abs(r - base) * 1000));
     }, 200);
 
-    // --- 聲音：由主持人決定觀眾要不要靜音 ---
-    function updateSound() {
-      if (state && state.end) return;
-      const hostMute = !!(state && state.m);
-      const wantMute = hostMute;
-      if (hostMute && !unlocked && !isSafariLike) { unlocked = true; $('tap').classList.add('hidden'); } // 靜音播放不用點，直接開始（iPhone 除外：要先點影片，之後開聲音才不會被暫停）
-      if (!wantMute && !gestured && unlocked) { // 要出聲音但還沒點過 → 請觀眾點一下
-        $('tapTitle').textContent = '主持人打開聲音了';
-        $('tapBtn').textContent = '點一下聽聲音';
-        $('tap').classList.remove('hidden');
-      }
-      if (!playerReady) return;
-      if (wantMute || (!gestured && !isSafariLike)) { if (!player.isMuted()) player.mute(); }
-      else if (player.isMuted()) { player.unMute(); player.setVolume(100); }
-    }
-    setInterval(updateSound, 500);
+    // --- 聲音：觀眾一律靜音 ---
+    function keepMuted() { try { if (playerReady && !player.isMuted()) player.mute(); } catch (e) {} }
+    setInterval(keepMuted, 1000);
 
     const diagStart = Date.now();
     const diagTimer = setInterval(() => {
@@ -468,9 +425,9 @@ window.addEventListener('error', e => { const el = document.getElementById('err'
       try { if (playerReady) { st = player.getPlayerState(); ct = player.getCurrentTime(); muted = player.isMuted(); } } catch (e) { st = 'err ' + e.message; }
       net.publish('diag', {
         id: myId, ua: navigator.userAgent, at: Math.round((Date.now() - diagStart) / 1000),
-        playerReady, unlocked, gestured, directTap, st, ct, muted, loadedId,
-        state: state && { s: state.s, t: state.t, v: state.v, m: state.m, end: state.end },
-        shieldOff: $('shield').classList.contains('off'), tapShown: !$('tap').classList.contains('hidden'),
+        playerReady, directTap, st, ct, muted, loadedId,
+        state: state && { s: state.s, t: state.t, v: state.v, end: state.end },
+        shieldOff: $('shield').classList.contains('off'),
         trail: trail.slice(), events: stateEvents.slice(), conns: net.connectedCount(), seeks: seekCount, rateWorks: rateWorks,
         errs: window.__errs, yt: typeof YT, iframe: !!document.querySelector('#viewerWrap iframe'),
         lowPower: null,
@@ -479,13 +436,13 @@ window.addEventListener('error', e => { const el = document.getElementById('err'
 
     ytReady.then(() => {
       player = new YT.Player('viewerPlayer', {
-        playerVars: Object.assign({}, playerVars, { controls: 1, disablekb: 1, mute: isSafariLike ? 0 : 1 }), // 有播放鍵，觀眾要自己點時看得到；平常被遮罩擋住
+        playerVars: Object.assign({}, playerVars, { controls: 1, disablekb: 1, mute: 1 }), // 有播放鍵，觀眾要自己點時看得到；平常被遮罩擋住
         events: {
-          onReady: () => { playerReady = true; updateSound(); onState(); },
+          onReady: () => { playerReady = true; keepMuted(); onState(); },
           onStateChange: e => {
             stateEvents.push([Math.round((Date.now() % 1e6) / 100) / 10, e.data]); if (stateEvents.length > 30) stateEvents.shift();
             if (e.data === 1 && directTap) { // 觀眾自己點影片播起來了 → 蓋回遮罩、交給同步
-              setDirectTap(false); gestured = true; unlocked = true; $('tap').classList.add('hidden'); updateSound();
+              setDirectTap(false); keepMuted();
             }
           },
         },
@@ -511,14 +468,6 @@ window.addEventListener('error', e => { const el = document.getElementById('err'
     document.addEventListener('fullscreenchange', onFsChange);
     document.addEventListener('webkitfullscreenchange', onFsChange);
 
-    $('tapBtn').onclick = () => {
-      $('tap').classList.add('hidden');
-      unlocked = true; gestured = true;
-      if (playerReady) {
-        // 在使用者點擊的這一刻先播一下，之後手機才允許自動播放有聲音
-        updateSound(); player.playVideo();
-      }
-    };
   }
 
   // ---------- 入口 ----------
