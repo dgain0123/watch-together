@@ -370,6 +370,10 @@ window.addEventListener('error', e => { const el = document.getElementById('err'
     let rateWorks = !isSafariLike, rateFails = 0, lastCorr = null;
     function setDirectTap(on) {
       directTap = on;
+      // iOS：網頁替觀眾開聲音時會把影片暫停，要觀眾自己點影片才能有聲音播放
+      $('tapHint').innerHTML = state && !state.m
+        ? '🔊 要聽到聲音<br>請用手指點一下上面影片的正中間'
+        : '👆 影片沒有自動開始<br>請用手指點一下上面影片的正中間';
       $('shield').classList.toggle('off', on);
       $('tapHint').classList.toggle('hidden', !on);
     }
@@ -447,7 +451,7 @@ window.addEventListener('error', e => { const el = document.getElementById('err'
 
     ytReady.then(() => {
       player = new YT.Player('viewerPlayer', {
-        playerVars: Object.assign({}, playerVars, { controls: 0, disablekb: 1, mute: 1 }),
+        playerVars: Object.assign({}, playerVars, { controls: 1, disablekb: 1, mute: 1 }), // 有播放鍵，觀眾要自己點時看得到；平常被遮罩擋住
         events: {
           onReady: () => { playerReady = true; updateSound(); onState(); },
           onStateChange: e => {
