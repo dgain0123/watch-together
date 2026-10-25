@@ -1,0 +1,265 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>一起看 YouTube</title>
+<style>
+  :root { --bg:#111; --card:#1d1d1f; --fg:#f2f2f2; --muted:#9a9a9a; --accent:#ff3b30; --ok:#34c759; }
+  * { box-sizing: border-box; }
+  body { margin:0; background:var(--bg); color:var(--fg); font-family:-apple-system,"PingFang TC","Noto Sans TC",sans-serif; }
+  main { max-width:720px; margin:0 auto; padding:16px; }
+  h1 { font-size:20px; margin:4px 0 12px; }
+  .card { background:var(--card); border-radius:14px; padding:14px; margin-bottom:14px; }
+  .row { display:flex; gap:8px; }
+  input { flex:1; min-width:0; font-size:16px; padding:12px; border-radius:10px; border:1px solid #333; background:#000; color:var(--fg); }
+  button { font-size:16px; padding:12px 16px; border-radius:10px; border:0; background:var(--accent); color:#fff; font-weight:600; }
+  button.secondary { background:#333; }
+  .player-wrap { position:relative; width:100%; aspect-ratio:16/9; background:#000; border-radius:12px; overflow:hidden; }
+  .player-wrap > div, .player-wrap iframe { position:absolute; inset:0; width:100%; height:100%; }
+  .shield { position:absolute; inset:0; z-index:2; }
+  #qr { background:#fff; padding:12px; border-radius:12px; width:fit-content; margin:8px auto; }
+  #qr img, #qr canvas { display:block; width:220px; height:220px; }
+  .link { word-break:break-all; color:var(--muted); font-size:13px; text-align:center; }
+  .status { font-size:14px; color:var(--muted); margin:8px 0 0; }
+  .status b { color:var(--ok); font-weight:600; }
+  .hint { font-size:13px; color:var(--muted); line-height:1.6; }
+  #tap { position:fixed; inset:0; z-index:10; background:rgba(0,0,0,.85); display:flex; flex-direction:column; align-items:center; justify-content:center; gap:16px; text-align:center; padding:24px; }
+  #tap button { font-size:22px; padding:18px 32px; border-radius:16px; }
+  .hidden { display:none !important; }
+</style>
+</head>
+<body>
+<main>
+  <!-- 主持人畫面 -->
+  <section id="host" class="hidden">
+    <h1>一起看 YouTube（主持人）</h1>
+    <div class="card">
+      <div class="row">
+        <input id="url" placeholder="貼上 YouTube 影片連結" autocomplete="off">
+        <button id="go">播放</button>
+      </div>
+      <p class="status" id="hostStatus">連線中…</p>
+    </div>
+    <div class="card">
+      <div class="player-wrap"><div id="hostPlayer"></div></div>
+      <p class="hint">直接在影片上按播放、暫停、拖進度條，大家的手機都會跟著動。</p>
+    </div>
+    <div class="card">
+      <div class="hint" style="text-align:center">請大家用手機相機掃這個 QR code</div>
+      <div id="qr"></div>
+      <div class="link" id="joinLink"></div>
+      <div class="row" style="justify-content:center;margin-top:10px">
+        <button class="secondary" id="copy">複製連結</button>
+        <button class="secondary" id="newRoom">換一個新房間</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- 觀眾畫面 -->
+  <section id="viewer" class="hidden">
+    <h1>一起看 YouTube</h1>
+    <div class="player-wrap"><div id="viewerPlayer"></div><div class="shield"></div></div>
+    <p class="status" id="viewerStatus">連線中…</p>
+    <p class="hint">影片由主持人控制，會自動跟主持人同步。可以把手機轉橫的看。</p>
+  </section>
+</main>
+
+<div id="tap" class="hidden">
+  <div style="font-size:18px">準備好了嗎？</div>
+  <button id="tapBtn">點我開始觀看</button>
+  <div class="hint">手機規定要先點一下才能放出聲音</div>
+</div>
+
+<script src="https://unpkg.com/mqtt@5.10.1/dist/mqtt.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+<script>
+(() => {
+  // 兩台公開訊息伺服器同時連，一台掛了另一台還能用
+  const BROKERS = ['wss://broker.emqx.io:8084/mqtt', 'wss://broker.hivemq.com:8884/mqtt'];
+  const PREFIX = 'dgain0123-watch-together/v1/';
+
+  const params = new URLSearchParams(location.search);
+  const $ = id => document.getElementById(id);
+  const safeGet = k => { try { return localStorage.getItem(k); } catch { return null; } };
+  const safeSet = (k, v) => { try { localStorage.setItem(k, v); } catch {} };
+  const randId = n => Array.from(crypto.getRandomValues(new Uint8Array(n)), b => 'abcdefghjkmnpqrstuvwxyz23456789'[b % 31]).join('');
+
+  // ---------- 訊息連線 ----------
+  function connectAll(room, onMsg, onStatus) {
+    const clients = BROKERS.map(url => {
+      const c = mqtt.connect(url, { clientId: 'wt_' + randId(10), reconnectPeriod: 2000, connectTimeout: 8000, clean: true });
+      c.on('connect', () => { c.subscribe(PREFIX + room + '/#'); onStatus(); });
+      c.on('close', onStatus);
+      c.on('message', (topic, payload, packet) => {
+        try { onMsg(topic.slice((PREFIX + room + '/').length), JSON.parse(payload.toString()), packet.retain); } catch {}
+      });
+      return c;
+    });
+    return {
+      publish(sub, obj, retain) {
+        const s = JSON.stringify(obj);
+        clients.forEach(c => c.connected && c.publish(PREFIX + room + '/' + sub, s, { qos: 0, retain: !!retain }));
+      },
+      connectedCount: () => clients.filter(c => c.connected).length,
+    };
+  }
+
+  // ---------- YouTube ----------
+  function parseVideoId(text) {
+    text = (text || '').trim();
+    if (/^[\w-]{11}$/.test(text)) return text;
+    const m = text.match(/(?:youtu\.be\/|[?&]v=|\/shorts\/|\/live\/|\/embed\/)([\w-]{11})/);
+    return m ? m[1] : null;
+  }
+  const ytReady = new Promise(res => { window.onYouTubeIframeAPIReady = res; });
+  const tag = document.createElement('script'); tag.src = 'https://www.youtube.com/iframe_api'; document.head.appendChild(tag);
+  const playerVars = { playsinline: 1, rel: 0, modestbranding: 1 };
+
+  // ================= 主持人 =================
+  function startHost(room) {
+    $('host').classList.remove('hidden');
+    const joinUrl = location.origin + location.pathname + '?room=' + room;
+    $('joinLink').textContent = joinUrl;
+    new QRCode($('qr'), { text: joinUrl, width: 440, height: 440, correctLevel: QRCode.CorrectLevel.M });
+    $('copy').onclick = async () => {
+      try { await navigator.clipboard.writeText(joinUrl); $('copy').textContent = '已複製'; } catch { prompt('複製這個連結', joinUrl); }
+      setTimeout(() => $('copy').textContent = '複製連結', 1500);
+    };
+    $('newRoom').onclick = () => { if (confirm('換新房間後，舊的 QR code 會失效，確定嗎？')) { const r = randId(6); safeSet('wt_host_room', r); location.search = '?host=' + r; } };
+
+    const viewers = new Map(); // 觀眾 id → 最後回報時間
+    let player = null, videoId = null;
+
+    const net = connectAll(room, (sub, msg) => {
+      if (sub === 'hello' && msg.id) viewers.set(msg.id, Date.now());
+    }, refreshStatus);
+
+    function refreshStatus() {
+      const now = Date.now();
+      for (const [id, t] of viewers) if (now - t > 12000) viewers.delete(id);
+      const ok = net && net.connectedCount() > 0;
+      $('hostStatus').innerHTML = ok ? `<b>已連線</b>　目前有 ${viewers.size} 人在看` : '連線中…（如果一直連不上，請檢查網路）';
+    }
+    setInterval(refreshStatus, 3000);
+
+    function sendState() {
+      if (!player || !videoId || !player.getCurrentTime) return;
+      const st = player.getPlayerState();
+      const playing = st === YT.PlayerState.PLAYING || st === YT.PlayerState.BUFFERING;
+      net.publish('state', { v: videoId, s: playing ? 'play' : 'pause', t: player.getCurrentTime(), r: player.getPlaybackRate(), ts: Date.now() }, true);
+    }
+    setInterval(sendState, 1000);
+
+    ytReady.then(() => {
+      player = new YT.Player('hostPlayer', {
+        playerVars,
+        events: {
+          onReady: () => {
+            const last = safeGet('wt_host_video');
+            if (last) { videoId = last; player.cueVideoById(last); $('url').value = 'https://youtu.be/' + last; }
+          },
+          onStateChange: sendState,
+          onPlaybackRateChange: sendState,
+        },
+      });
+    });
+
+    function go() {
+      const id = parseVideoId($('url').value);
+      if (!id) { alert('看不懂這個連結，請貼 YouTube 影片的網址'); return; }
+      videoId = id; safeSet('wt_host_video', id);
+      player.loadVideoById(id);
+      sendState();
+    }
+    $('go').onclick = go;
+    $('url').addEventListener('keydown', e => { if (e.key === 'Enter') go(); });
+  }
+
+  // ================= 觀眾 =================
+  function startViewer(room) {
+    $('viewer').classList.remove('hidden');
+    $('tap').classList.remove('hidden');
+    const myId = randId(8);
+    let player = null, playerReady = false, unlocked = false, state = null, lastTs = 0;
+    const offsets = []; // 估算兩台手機的時鐘差
+
+    const net = connectAll(room, (sub, msg, retained) => {
+      if (sub !== 'state' || !msg.v || msg.ts <= lastTs) return;
+      lastTs = msg.ts;
+      if (!retained) { offsets.push(Date.now() - msg.ts); if (offsets.length > 30) offsets.shift(); }
+      state = msg;
+      apply();
+    }, refreshStatus);
+    setInterval(() => net.publish('hello', { id: myId }), 5000);
+    net.publish('hello', { id: myId });
+
+    function refreshStatus() {
+      const ok = net && net.connectedCount() > 0;
+      $('viewerStatus').innerHTML = !ok ? '連線中…' : state ? '<b>已連線</b>　跟主持人同步中' : '<b>已連線</b>　等主持人選影片…';
+    }
+
+    // 主持人那一刻的播放時間，換算成「現在」應該在哪
+    function expectedTime() {
+      if (state.s !== 'play') return state.t;
+      let elapsed = 0.3;
+      if (offsets.length) {
+        const offset = Math.min(...offsets); // 時鐘差＋最短傳送時間
+        elapsed = (Date.now() - state.ts - offset) / 1000 + 0.15;
+      }
+      return state.t + Math.max(0, elapsed) * (state.r || 1);
+    }
+
+    let loadedId = null;
+    function apply() {
+      refreshStatus();
+      if (!state || !playerReady) return;
+      if (loadedId !== state.v) {
+        loadedId = state.v;
+        if (unlocked) player.loadVideoById(state.v, expectedTime()); else player.cueVideoById(state.v, expectedTime());
+        return;
+      }
+      if (!unlocked) return;
+      if (player.getPlaybackRate() !== (state.r || 1)) player.setPlaybackRate(state.r || 1);
+      const want = expectedTime(), cur = player.getCurrentTime(), st = player.getPlayerState();
+      if (state.s === 'play') {
+        if (Math.abs(cur - want) > 0.8) player.seekTo(want, true);
+        if (st !== YT.PlayerState.PLAYING && st !== YT.PlayerState.BUFFERING) player.playVideo();
+      } else {
+        if (st === YT.PlayerState.PLAYING || st === YT.PlayerState.BUFFERING) player.pauseVideo();
+        if (Math.abs(cur - want) > 0.5) player.seekTo(want, true);
+      }
+    }
+
+    ytReady.then(() => {
+      player = new YT.Player('viewerPlayer', {
+        playerVars: { ...playerVars, controls: 0, disablekb: 1 },
+        events: { onReady: () => { playerReady = true; if (unlocked) { player.unMute(); player.setVolume(100); } apply(); } },
+      });
+    });
+
+    $('tapBtn').onclick = () => {
+      $('tap').classList.add('hidden');
+      unlocked = true;
+      if (playerReady) {
+        // 在使用者點擊的這一刻先播一下，之後手機才允許自動播放有聲音
+        player.unMute(); player.setVolume(100); player.playVideo();
+        setTimeout(apply, 300);
+      }
+    };
+  }
+
+  // ---------- 入口 ----------
+  if (params.get('room')) {
+    startViewer(params.get('room'));
+  } else {
+    let room = params.get('host') || safeGet('wt_host_room');
+    if (!room) room = randId(6);
+    safeSet('wt_host_room', room);
+    if (params.get('host') !== room) history.replaceState(null, '', '?host=' + room);
+    startHost(room);
+  }
+})();
+</script>
+</body>
+</html>
