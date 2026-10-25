@@ -27,6 +27,7 @@
   #tap { position:fixed; inset:0; z-index:10; background:rgba(0,0,0,.85); display:flex; flex-direction:column; align-items:center; justify-content:center; gap:16px; text-align:center; padding:24px; }
   #tap button { font-size:22px; padding:18px 32px; border-radius:16px; }
   .hidden { display:none !important; }
+  button.big { width:100%; font-size:20px; padding:18px; border-radius:14px; }
   .fs-btn { width:100%; margin-top:10px; background:#333; }
   #fsExit { position:absolute; top:10px; right:10px; z-index:3; padding:8px 14px; font-size:15px; background:rgba(0,0,0,.55); display:none; }
   /* 全螢幕：鋪滿畫面；直拿手機時把影片轉 90 度 */
@@ -53,8 +54,10 @@
       </div>
     </div>
     <div class="card">
+      <button id="pasteGo" class="big">📋 貼上並播放</button>
+      <p class="hint" style="margin:8px 0 12px">在 YouTube 按「分享」→「複製連結」，回來按上面的按鈕就開始。iPhone 會跳出「貼上」小泡泡，點它一下。</p>
       <div class="row">
-        <input id="url" placeholder="貼上 YouTube 影片連結" autocomplete="off">
+        <input id="url" placeholder="或把連結貼在這裡" autocomplete="off">
         <button id="go">播放</button>
       </div>
       <p class="status" id="hostStatus">連線中…</p>
@@ -216,11 +219,23 @@
     function go() {
       const id = parseVideoId($('url').value);
       if (!id) { alert('看不懂這個連結，請貼 YouTube 影片的網址'); return; }
+      if (!player || !player.loadVideoById) { alert('播放器還在準備，請等一下再按'); return; }
       videoId = id; safeSet('wt_host_video', id);
       player.loadVideoById(id);
       sendState();
     }
     $('go').onclick = go;
+    // 一鍵：讀剪貼簿 → 播放
+    $('pasteGo').onclick = async () => {
+      let text = '';
+      try { text = await navigator.clipboard.readText(); } catch {}
+      if (!text) { $('url').focus(); alert('讀不到剪貼簿，請長按輸入框選「貼上」'); return; }
+      if (!parseVideoId(text)) { alert('剪貼簿裡不是 YouTube 連結。請在 YouTube 按「分享」→「複製連結」再回來按'); return; }
+      $('url').value = text.trim();
+      go();
+    };
+    // 直接貼進輸入框也自動開始
+    $('url').addEventListener('paste', () => setTimeout(() => { if (parseVideoId($('url').value)) go(); }, 0));
     $('url').addEventListener('keydown', e => { if (e.key === 'Enter') go(); });
   }
 

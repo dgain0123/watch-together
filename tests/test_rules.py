@@ -19,4 +19,6 @@ check("觀眾有全螢幕按鈕", 'id="fsBtn"' in html and 'id="fsExit"' in html
 # 使用者裁示（2026-10-25）：主持人網頁的 QR code 放在最上面（標題下第一塊）
 host = html[html.index('<section id="host"'):html.index('</section>')]
 check("主持人網頁 QR code 在最上面", host.index('id="qr"') < host.index('id="url"') < host.index('id="hostPlayer"'))
+# 使用者裁示（2026-10-25）：不用自己貼網址，要有「一鍵貼上並播放」大按鈕
+check("有一鍵貼上並播放按鈕", 'id="pasteGo"' in html and "clipboard.readText" in html)
 sys.exit(1 if fails else 0)

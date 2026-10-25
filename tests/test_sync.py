@@ -56,7 +56,12 @@ async def main():
             await h.goto(U + "?host=" + room)
             await asyncio.sleep(3)
             check("主持人連上訊息伺服器", "已連線" in await h.inner_text("#hostStatus"))
-            await h.fill("#url", VID); await h.click("#go")
+            # 一鍵貼上並播放：模擬在 YouTube 按「複製連結」的分享文字
+            await h.context.grant_permissions(["clipboard-read", "clipboard-write"], origin=U.rstrip("/"))
+            await h.evaluate(f"navigator.clipboard.writeText('https://youtu.be/{VID}?si=abc123')")
+            await h.click("#pasteGo")
+            await asyncio.sleep(1)
+            check("一鍵貼上並播放：讀到剪貼簿的連結", VID in await h.input_value("#url"))
             hf = await host_play(h)
 
             vs = []
@@ -111,6 +116,14 @@ async def main():
             check(f"全螢幕鋪滿畫面 {r} vs {vp}", abs(r[0] - vp["width"]) < 2 and abs(r[1] - vp["height"]) < 2)
             await v.click("#fsExit"); await asyncio.sleep(0.5)
             check("離開全螢幕", "fs" not in await v.evaluate("document.body.className"))
+            # 直接貼進輸入框也會自動開始（換一部影片）
+            await h.evaluate("(()=>{const el=document.getElementById('url');el.value='https://www.youtube.com/watch?v=jNQXAC9IVRw';el.dispatchEvent(new Event('paste'))})()")
+            ok = False
+            for _ in range(20):  # 換成 19 秒的短片，觀眾的影片長度跟著變短
+                await asyncio.sleep(0.5)
+                d2 = [await f.evaluate("(()=>{const v=document.querySelector('video');return v?v.duration:0})()") for f in vs[1].frames if "youtube.com/embed" in f.url]
+                if d2 and 0 < d2[0] < 30: ok = True; break
+            check("貼進輸入框就自動開始，觀眾跟著換影片", ok)
             await b.close()
     finally:
         srv.kill()
