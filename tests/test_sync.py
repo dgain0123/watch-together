@@ -1,0 +1,117 @@
+"""實際開瀏覽器測：一台主持人＋兩台觀眾（時鐘故意調快 3 秒、調慢 1.7 秒），量同步誤差。
+需要網路（YouTube＋公開訊息伺服器）。約 60 秒。"""
+import asyncio, os, random, socket, subprocess, sys, time
+from playwright.async_api import async_playwright
+
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+VID = "dQw4w9WgXcQ"
+TOL_MS = 60          # 穩定播放時容許誤差
+fails = []
+def check(name, cond):
+    print(("PASS " if cond else "FAIL ") + name, flush=True)
+    if not cond: fails.append(name)
+
+def free_port():
+    s = socket.socket(); s.bind(("127.0.0.1", 0)); p = s.getsockname()[1]; s.close(); return p
+
+async def video(p):
+    for f in p.frames:
+        if "youtube.com/embed" in f.url:
+            return await f.evaluate("(()=>{const v=document.querySelector('video');return v?{t:v.currentTime,at:performance.timeOrigin+performance.now(),paused:v.paused,muted:v.muted,rate:v.playbackRate}:null})()")
+
+async def diff_ms(h, v):
+    H, V = await video(h), await video(v)
+    if not H or not V: return None
+    # 電腦上大家共用同一個真時鐘，換算到主持人讀值那一刻再比
+    vt = V["t"] + (0 if V["paused"] else (H["at"] - V["at"]) / 1000 * V["rate"])
+    return (vt - H["t"]) * 1000
+
+async def host_play(h):
+    """主持人按播放：影片可能還在載入，重試到真的在播。"""
+    for _ in range(40):
+        try:
+            hf = [f for f in h.frames if "youtube.com/embed" in f.url][0]
+            ok = await hf.evaluate("(async()=>{const v=document.querySelector('video');if(!v)return false;try{await v.play()}catch(e){};return !v.paused&&v.currentTime>0})()")
+            if ok: return hf
+        except Exception:
+            pass
+        await asyncio.sleep(0.5)
+    raise RuntimeError("主持人影片播不起來")
+
+async def wait_stable(h, vs, secs=8):
+    await asyncio.sleep(secs)
+    return [await diff_ms(h, v) for v in vs]
+
+async def main():
+    port = free_port()
+    srv = subprocess.Popen([sys.executable, "-m", "http.server", str(port)], cwd=ROOT,
+                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    time.sleep(1)
+    U, room = f"http://localhost:{port}/", "t" + str(random.randint(10**5, 10**6))
+    try:
+        async with async_playwright() as pw:
+            b = await pw.chromium.launch()  # 預設自動播放規則＝跟手機一樣，沒點過只能靜音播
+            mob = {k: v for k, v in pw.devices["iPhone 13"].items() if k != "default_browser_type"}
+            h = await (await b.new_context(**mob)).new_page()
+            await h.goto(U + "?host=" + room)
+            await asyncio.sleep(3)
+            check("主持人連上訊息伺服器", "已連線" in await h.inner_text("#hostStatus"))
+            await h.fill("#url", VID); await h.click("#go")
+            hf = await host_play(h)
+
+            vs = []
+            for skew in (3000, -1700):
+                c = await b.new_context(**mob)
+                await c.add_init_script(f"(()=>{{const D=Date.now.bind(Date);Date.now=()=>D()+({skew});}})()")
+                v = await c.new_page(); await v.goto(U + "?room=" + room); vs.append(v)
+            for v in vs: await v.click("#tapBtn")
+
+            d = await wait_stable(h, vs, 10)
+            check(f"播放同步誤差 < {TOL_MS}ms（時鐘偏 +3s／-1.7s）：{d}", all(x is not None and abs(x) < TOL_MS for x in d))
+            V = await video(vs[0])
+            check("觀眾點過開始後有聲音", V and not V["muted"])
+
+            await hf.evaluate("(()=>{const v=document.querySelector('video');v.currentTime+=20})()")
+            d = await wait_stable(h, vs, 6)
+            check(f"主持人跳 20 秒後跟上：{d}", all(x is not None and abs(x) < TOL_MS for x in d))
+
+            await hf.evaluate("document.querySelector('video').pause()")
+            await asyncio.sleep(3)
+            Vs = [await video(v) for v in vs]; d = [await diff_ms(h, v) for v in vs]
+            check(f"主持人暫停→觀眾也停在同一格：{d}", all(x["paused"] for x in Vs) and all(abs(x) < 50 for x in d))
+            hf = await host_play(h)
+
+            # 主持人全部靜音：新觀眾不用點就直接靜音播放；關掉後要點一下才出聲
+            await h.click("#muteAll")
+            await asyncio.sleep(2)
+            Vs = [await video(v) for v in vs]
+            check("全部靜音→舊觀眾都變靜音", all(x["muted"] for x in Vs))
+            nv = await (await b.new_context(**mob)).new_page(); await nv.goto(U + "?room=" + room)
+            await asyncio.sleep(10)
+            N = await video(nv); dn = await diff_ms(h, nv)
+            check(f"全部靜音時新觀眾不用點就開始播（靜音、同步 {dn}）",
+                  N and not N["paused"] and N["muted"] and not await nv.is_visible("#tap") and dn is not None and abs(dn) < TOL_MS)
+            await h.click("#muteAll")
+            await asyncio.sleep(2)
+            Vs = [await video(v) for v in vs]
+            check("關掉全部靜音→點過的觀眾恢復聲音", all(not x["muted"] for x in Vs))
+            check("關掉全部靜音→沒點過的觀眾跳出「點一下聽聲音」", await nv.is_visible("#tap"))
+            await nv.click("#tapBtn"); await asyncio.sleep(1.5)
+            N = await video(nv)
+            check("沒點過的觀眾點一下後有聲音且繼續播", N and not N["muted"] and not N["paused"])
+
+            # 全螢幕（模擬 iPhone：沒有真全螢幕功能）
+            v = vs[0]
+            await v.evaluate("delete Element.prototype.requestFullscreen")
+            await v.click("#fsBtn"); await asyncio.sleep(0.8)
+            r = await v.evaluate("(()=>{const r=document.getElementById('viewerWrap').getBoundingClientRect();return [r.width,r.height]})()")
+            vp = v.viewport_size
+            check(f"全螢幕鋪滿畫面 {r} vs {vp}", abs(r[0] - vp["width"]) < 2 and abs(r[1] - vp["height"]) < 2)
+            await v.click("#fsExit"); await asyncio.sleep(0.5)
+            check("離開全螢幕", "fs" not in await v.evaluate("document.body.className"))
+            await b.close()
+    finally:
+        srv.kill()
+
+asyncio.run(asyncio.wait_for(main(), 180))  # 最多 3 分鐘，不准卡死
+sys.exit(1 if fails else 0)

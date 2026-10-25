@@ -49,6 +49,8 @@
         <button id="go">播放</button>
       </div>
       <p class="status" id="hostStatus">連線中…</p>
+      <button class="fs-btn" id="muteAll"></button>
+      <p class="hint" id="muteAllHint"></p>
     </div>
     <div class="card">
       <div class="player-wrap"><div id="hostPlayer"></div></div>
@@ -76,7 +78,7 @@
 </main>
 
 <div id="tap" class="hidden">
-  <div style="font-size:18px">準備好了嗎？</div>
+  <div style="font-size:18px" id="tapTitle">準備好了嗎？</div>
   <button id="tapBtn">點我開始觀看</button>
   <div class="hint">手機規定要先點一下才能放出聲音</div>
 </div>
@@ -178,6 +180,14 @@
     }
     setInterval(refreshStatus, 3000);
 
+    let muteAll = safeGet('wt_mute_all') === '1';
+    function showMuteAll() {
+      $('muteAll').textContent = muteAll ? '🔇 觀眾全部靜音中（按一下讓觀眾有聲音）' : '🔊 觀眾有聲音（按一下讓觀眾全部靜音）';
+      $('muteAllHint').textContent = muteAll ? '只有你的手機出聲音，適合大家在同一個房間。觀眾掃了就直接開始看，不用按任何東西。' : '大家在同一個房間的話，建議打開「觀眾全部靜音」，才不會有回音。';
+    }
+    showMuteAll();
+    $('muteAll').onclick = () => { muteAll = !muteAll; safeSet('wt_mute_all', muteAll ? '1' : '0'); showMuteAll(); sendState(); };
+
     const pos = makePosEstimator(() => player);
     function sendState() {
       if (!player || !videoId || !player.getCurrentTime) return;
@@ -185,7 +195,7 @@
       const playing = st === YT.PlayerState.PLAYING;
       const p = pos();
       // 緩衝中＝主持人那邊畫面停住，觀眾也先停在同一格
-      net.publish('state', { v: videoId, s: playing ? 'play' : 'pause', t: p.t, g: p.good, r: player.getPlaybackRate(), ts: Date.now() }, true);
+      net.publish('state', { v: videoId, s: playing ? 'play' : 'pause', t: p.t, g: p.good, r: player.getPlaybackRate(), m: muteAll, ts: Date.now() }, true);
     }
     setInterval(sendState, 500);
 
@@ -220,6 +230,7 @@
     $('tap').classList.remove('hidden');
     const myId = randId(8);
     let player = null, playerReady = false, unlocked = false, state = null, lastTs = 0;
+    let gestured = false; // gestured＝觀眾點過畫面（手機要點過才准出聲音）
 
     // --- 對時：問主持人「你現在幾點」，取來回最快的那次算時鐘差 ---
     const pongs = [];
@@ -240,6 +251,7 @@
       if (!retained) { offsets.push(msg.ts - Date.now()); if (offsets.length > 30) offsets.shift(); }
       state = msg;
       onState();
+      updateSound();
     }, refreshStatus);
     setInterval(() => net.publish('hello', { id: myId }), 5000);
     net.publish('hello', { id: myId });
@@ -301,10 +313,26 @@
                  Math.min(4000, Math.abs(d) / Math.abs(r - base) * 1000));
     }, 200);
 
+    // --- 聲音：由主持人決定觀眾要不要靜音 ---
+    function updateSound() {
+      const hostMute = !!(state && state.m);
+      const wantMute = hostMute;
+      if (hostMute && !unlocked) { unlocked = true; $('tap').classList.add('hidden'); } // 靜音播放不用點，直接開始
+      if (!wantMute && !gestured && unlocked) { // 要出聲音但還沒點過 → 請觀眾點一下
+        $('tapTitle').textContent = '主持人打開聲音了';
+        $('tapBtn').textContent = '點一下聽聲音';
+        $('tap').classList.remove('hidden');
+      }
+      if (!playerReady) return;
+      if (wantMute || !gestured) { if (!player.isMuted()) player.mute(); }
+      else if (player.isMuted()) { player.unMute(); player.setVolume(100); }
+    }
+    setInterval(updateSound, 500);
+
     ytReady.then(() => {
       player = new YT.Player('viewerPlayer', {
         playerVars: { ...playerVars, controls: 0, disablekb: 1 },
-        events: { onReady: () => { playerReady = true; if (unlocked) { player.unMute(); player.setVolume(100); } onState(); } },
+        events: { onReady: () => { playerReady = true; updateSound(); onState(); } },
       });
     });
 
@@ -329,10 +357,10 @@
 
     $('tapBtn').onclick = () => {
       $('tap').classList.add('hidden');
-      unlocked = true;
+      unlocked = true; gestured = true;
       if (playerReady) {
         // 在使用者點擊的這一刻先播一下，之後手機才允許自動播放有聲音
-        player.unMute(); player.setVolume(100); player.playVideo();
+        updateSound(); player.playVideo();
       }
     };
   }
