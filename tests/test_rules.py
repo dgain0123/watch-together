@@ -47,4 +47,15 @@ except Exception as e:
     check(f"程式庫本身舊 iPhone 也看得懂（ES2017）：{e}", False)
 css = html[html.index("<style>"):html.index("</style>")]
 check("版面不用舊 iPhone 不支援的 inset / aspect-ratio", "inset:" not in css and "aspect-ratio" not in css)
+# ---- 2026-10-25 各修正的釘樁（完整來龍去脈見 詳解_修正紀錄.md）----
+# 卡住偵測要「播放器說在播＋時間有在變」：iOS 12 實測播放器停在 -1 但跳轉讓時間一直變，只看時間會被騙
+check("卡住偵測看播放器狀態（st===1）不只看時間", "if (st === 1 && ct !== lastCt" in html)
+# 主畫面 App 會一直開「加入當下的網址」→ 以手機記住的房號為準，結束過的舊房間不能復活
+check("主持人房號以手機記住的為準", "let room = safeGet('wt_host_room') || params.get('host');" in html)
+# 診斷工具也用自架程式庫（unpkg 偶爾慢到開不起來）
+tool = open(os.path.join(ROOT, "tools", "listen_diag.py"), encoding="utf-8").read()
+check("診斷工具用自架 mqtt 程式庫", "mqtt-4.3.8.min.js" in tool and "unpkg" not in tool)
+check("觀眾會回報狀態給診斷工具（含最近 10 秒紀錄）", "net.publish('diag'" in html and "trail: trail.slice()" in html)
+# 觀眾一開頁就報到會碰到還沒建立的變數（TDZ）→ 第一次報到要延後
+check("觀眾第一次報到延後（避免變數還沒建立）", "setTimeout(sayHello," in html)
 sys.exit(1 if fails else 0)

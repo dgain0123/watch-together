@@ -1,0 +1,74 @@
+{
+  "畫面元件": {
+    "主持人頁面（依序）": [
+      "host",
+      "qr",
+      "joinLink",
+      "copy",
+      "pasteGo",
+      "url",
+      "go",
+      "hostStatus",
+      "endShow",
+      "endHint",
+      "hostPlayer"
+    ],
+    "觀眾頁面（依序）": [
+      "viewer",
+      "viewerWrap",
+      "viewerPlayer",
+      "shield",
+      "fsExit",
+      "tapHint",
+      "fsBtn",
+      "viewerStatus",
+      "err"
+    ],
+    "不准出現（已依裁示拿掉）": [
+      "muteAll",
+      "muteAllHint",
+      "newRoom",
+      "selfMute",
+      "tap",
+      "tapBtn",
+      "tapTitle"
+    ],
+    "QR code 在主持人頁面最上面": true,
+    "紅框在影片外面": true
+  },
+  "提示文字": {
+    "紅框": "👆 影片沒有自動開始<br>請點一下上面影片中間的 ▶ 播放鍵",
+    "主持人靜音說明": "觀眾的影片一律靜音（大家在同一個空間，聲音聽你的手機就好），觀眾掃了就直接開始看。",
+    "已結束": "<div>主持人已結束放映</div>\n  <div class=\"hint\">可以關掉這個網頁了。下次放映請重新掃主持人的新 QR code。",
+    "結束放映按鈕": "⏹ 結束放映（舊 QR code 全部失效）",
+    "載入中": "載入中…（一直停在這裡的話，請告訴主持人）"
+  },
+  "播放器設定": {
+    "共用": "{ playsinline: 1, rel: 0, modestbranding: 1 }",
+    "觀眾": "Object.assign({}, playerVars, { controls: 1, disablekb: 1, mute: 1 })"
+  },
+  "同步參數": {
+    "訊息伺服器": [
+      "wss://broker.emqx.io:8084/mqtt",
+      "wss://broker.hivemq.com:8884/mqtt"
+    ],
+    "主題前綴": "dgain0123-watch-together/v1/",
+    "主持人送狀態間隔ms": "500",
+    "位置取樣間隔ms": "25",
+    "跳轉門檻": "rateWorks ? 0.3 : 0.05",
+    "微調沒效幾次改跳轉": "2",
+    "iPhone/Safari 一開始只用跳轉": "rateWorks = !isSafariLike",
+    "Safari 判斷": "/iPhone|iPad|iPod/.test(ua) || (/Safari/.test(ua) && !/Chrome|Chromium|Android|Edg/.test(ua))",
+    "卡住判定ms": "2500",
+    "紅框出現時停止跳轉": true,
+    "對時頻率": "pingCount < 15 ? 1000 : 5000"
+  },
+  "程式庫": {
+    "lib/mqtt-4.3.8.min.js": "a4e43873299319f7",
+    "lib/qrcode-1.0.0.min.js": "c541ef06327885a8"
+  },
+  "測試門檻": {
+    "同步誤差ms": "80",
+    "Safari 同步誤差ms": "100"
+  }
+}

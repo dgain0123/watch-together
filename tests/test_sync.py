@@ -86,7 +86,7 @@ async def main():
                 await c.add_init_script(f"(()=>{{const D=Date.now.bind(Date);Date.now=()=>D()+({skew});}})()")
                 v = await c.new_page(); await v.goto(U + "?room=" + room, wait_until="domcontentloaded"); vs.append(v)
             # 使用者裁示（2026-10-25）：觀眾一律靜音、不用點任何東西就自動開始
-            d = await wait_stable(h, vs, 10)
+            d = await wait_stable(h, vs, 16)  # 對時前 15 秒每秒一次、挑最準的那次，太早量會量到還沒對準的
             check(f"觀眾不用點就自動開始、同步誤差 < {TOL_MS}ms（時鐘偏 +3s／-1.7s）：{d}", all(x is not None and abs(x) < TOL_MS for x in d))
             Vs = [await video(v) for v in vs]
             check("觀眾一律靜音", all(x and x["muted"] for x in Vs))
@@ -157,7 +157,7 @@ async def main():
                 if V and not V["paused"] and V["t"] > 0: ok = True; break
                 await asyncio.sleep(0.5)
             check("iPhone 觀眾不用點就自動開始、靜音、沒有紅框", ok and V["muted"] and not await wv.is_visible("#tapHint"))
-            await asyncio.sleep(12)
+            await asyncio.sleep(16)  # 等對時做完（前 15 秒每秒一次）再量
             dw = await median_diff(h, wv)
             if dw is None or abs(dw) >= 100:
                 print("  Safari 觀眾診斷:", await video(wv), await video(h), await wv.inner_text("#viewerStatus"), await wv.inner_text("#err"),
