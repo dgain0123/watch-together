@@ -27,6 +27,15 @@
   #tap { position:fixed; inset:0; z-index:10; background:rgba(0,0,0,.85); display:flex; flex-direction:column; align-items:center; justify-content:center; gap:16px; text-align:center; padding:24px; }
   #tap button { font-size:22px; padding:18px 32px; border-radius:16px; }
   .hidden { display:none !important; }
+  .fs-btn { width:100%; margin-top:10px; background:#333; }
+  #fsExit { position:absolute; top:10px; right:10px; z-index:3; padding:8px 14px; font-size:15px; background:rgba(0,0,0,.55); display:none; }
+  /* 全螢幕：鋪滿畫面；直拿手機時把影片轉 90 度 */
+  body.fs { overflow:hidden; }
+  body.fs #viewerWrap { position:fixed; z-index:20; border-radius:0; aspect-ratio:auto; top:0; left:0; width:100vw; height:100dvh; }
+  body.fs #fsExit { display:block; }
+  @media (orientation: portrait) {
+    body.fs #viewerWrap { width:100dvh; height:100vw; top:50%; left:50%; transform:translate(-50%,-50%) rotate(90deg); }
+  }
 </style>
 </head>
 <body>
@@ -59,9 +68,10 @@
   <!-- 觀眾畫面 -->
   <section id="viewer" class="hidden">
     <h1>一起看 YouTube</h1>
-    <div class="player-wrap"><div id="viewerPlayer"></div><div class="shield"></div></div>
+    <div class="player-wrap" id="viewerWrap"><div id="viewerPlayer"></div><div class="shield"></div><button id="fsExit">✕ 離開全螢幕</button></div>
+    <button class="fs-btn" id="fsBtn">⛶ 全螢幕觀看</button>
     <p class="status" id="viewerStatus">連線中…</p>
-    <p class="hint">影片由主持人控制，會自動跟主持人同步。可以把手機轉橫的看。</p>
+    <p class="hint">影片由主持人控制，會自動跟主持人同步。按「全螢幕觀看」可以滿版看。</p>
   </section>
 </main>
 
@@ -116,6 +126,30 @@
   const tag = document.createElement('script'); tag.src = 'https://www.youtube.com/iframe_api'; document.head.appendChild(tag);
   const playerVars = { playsinline: 1, rel: 0, modestbranding: 1 };
 
+  // ---------- 準確的播放位置 ----------
+  // YouTube 回報的時間每隔一小段才更新一次（會落後）。連續取樣，取「最不落後」的那筆推算現在的位置。
+  function makePosEstimator(getPlayer) {
+    let samples = [], lastKey = '';
+    setInterval(() => {
+      const p = getPlayer(); if (!p || !p.getCurrentTime || !p.getPlayerState) return;
+      const st = p.getPlayerState(), rate = p.getPlaybackRate(), ct = p.getCurrentTime(), now = Date.now();
+      const key = st + '|' + rate;
+      if (key !== lastKey || st !== 1) { samples = []; lastKey = key; }
+      if (st !== 1) return;
+      const last = samples[samples.length - 1];
+      if (last && Math.abs((ct - last[1]) - (now - last[0]) / 1000 * rate) > 0.5) samples = []; // 跳過進度
+      samples.push([now, ct, rate]);
+      while (now - samples[0][0] > 1500) samples.shift();
+    }, 25);
+    return () => {
+      const p = getPlayer(), now = Date.now(), ct = p.getCurrentTime();
+      if (p.getPlayerState() !== 1 || samples.length < 3) return { t: ct, good: false };
+      let best = -Infinity;
+      for (const [n, c, r] of samples) best = Math.max(best, c - n / 1000 * r);
+      return { t: best + now / 1000 * samples[0][2], good: now - samples[0][0] > 700 };
+    };
+  }
+
   // ================= 主持人 =================
   function startHost(room) {
     $('host').classList.remove('hidden');
@@ -133,6 +167,7 @@
 
     const net = connectAll(room, (sub, msg) => {
       if (sub === 'hello' && msg.id) viewers.set(msg.id, Date.now());
+      if (sub === 'ping' && msg.id) net.publish('pong/' + msg.id, { t0: msg.t0, th: Date.now() }); // 讓觀眾對時
     }, refreshStatus);
 
     function refreshStatus() {
@@ -143,13 +178,16 @@
     }
     setInterval(refreshStatus, 3000);
 
+    const pos = makePosEstimator(() => player);
     function sendState() {
       if (!player || !videoId || !player.getCurrentTime) return;
       const st = player.getPlayerState();
-      const playing = st === YT.PlayerState.PLAYING || st === YT.PlayerState.BUFFERING;
-      net.publish('state', { v: videoId, s: playing ? 'play' : 'pause', t: player.getCurrentTime(), r: player.getPlaybackRate(), ts: Date.now() }, true);
+      const playing = st === YT.PlayerState.PLAYING;
+      const p = pos();
+      // 緩衝中＝主持人那邊畫面停住，觀眾也先停在同一格
+      net.publish('state', { v: videoId, s: playing ? 'play' : 'pause', t: p.t, g: p.good, r: player.getPlaybackRate(), ts: Date.now() }, true);
     }
-    setInterval(sendState, 1000);
+    setInterval(sendState, 500);
 
     ytReady.then(() => {
       player = new YT.Player('hostPlayer', {
@@ -182,61 +220,112 @@
     $('tap').classList.remove('hidden');
     const myId = randId(8);
     let player = null, playerReady = false, unlocked = false, state = null, lastTs = 0;
-    const offsets = []; // 估算兩台手機的時鐘差
+
+    // --- 對時：問主持人「你現在幾點」，取來回最快的那次算時鐘差 ---
+    const pongs = [];
+    let clockOffset = null; // 主持人時鐘 − 我的時鐘（毫秒）
+    const offsets = [];     // 對時還沒好之前的備用估法
+    let pingCount = 0;
+    function ping() { net.publish('ping', { id: myId, t0: Date.now() }); pingCount++; setTimeout(ping, pingCount < 15 ? 1000 : 5000); }
 
     const net = connectAll(room, (sub, msg, retained) => {
+      if (sub === 'pong/' + myId) {
+        const t1 = Date.now(), rtt = t1 - msg.t0;
+        pongs.push({ rtt, off: msg.th - (msg.t0 + t1) / 2 }); if (pongs.length > 30) pongs.shift();
+        clockOffset = pongs.reduce((a, b) => (b.rtt < a.rtt ? b : a)).off;
+        return;
+      }
       if (sub !== 'state' || !msg.v || msg.ts <= lastTs) return;
       lastTs = msg.ts;
-      if (!retained) { offsets.push(Date.now() - msg.ts); if (offsets.length > 30) offsets.shift(); }
+      if (!retained) { offsets.push(msg.ts - Date.now()); if (offsets.length > 30) offsets.shift(); }
       state = msg;
-      apply();
+      onState();
     }, refreshStatus);
     setInterval(() => net.publish('hello', { id: myId }), 5000);
     net.publish('hello', { id: myId });
+    setTimeout(ping, 500);
 
     function refreshStatus() {
       const ok = net && net.connectedCount() > 0;
       $('viewerStatus').innerHTML = !ok ? '連線中…' : state ? '<b>已連線</b>　跟主持人同步中' : '<b>已連線</b>　等主持人選影片…';
     }
 
-    // 主持人那一刻的播放時間，換算成「現在」應該在哪
-    function expectedTime() {
+    const hostNow = () => Date.now() + (clockOffset ?? (offsets.length ? Math.max(...offsets) + 50 : 0));
+    // 主持人「現在」播到哪
+    function wantTime() {
       if (state.s !== 'play') return state.t;
-      let elapsed = 0.3;
-      if (offsets.length) {
-        const offset = Math.min(...offsets); // 時鐘差＋最短傳送時間
-        elapsed = (Date.now() - state.ts - offset) / 1000 + 0.15;
-      }
-      return state.t + Math.max(0, elapsed) * (state.r || 1);
+      return state.t + Math.max(0, hostNow() - state.ts) / 1000 * (state.r || 1);
     }
 
     let loadedId = null;
-    function apply() {
+    function onState() {
       refreshStatus();
-      if (!state || !playerReady) return;
-      if (loadedId !== state.v) {
-        loadedId = state.v;
-        if (unlocked) player.loadVideoById(state.v, expectedTime()); else player.cueVideoById(state.v, expectedTime());
-        return;
-      }
-      if (!unlocked) return;
-      if (player.getPlaybackRate() !== (state.r || 1)) player.setPlaybackRate(state.r || 1);
-      const want = expectedTime(), cur = player.getCurrentTime(), st = player.getPlayerState();
-      if (state.s === 'play') {
-        if (Math.abs(cur - want) > 0.8) player.seekTo(want, true);
-        if (st !== YT.PlayerState.PLAYING && st !== YT.PlayerState.BUFFERING) player.playVideo();
-      } else {
-        if (st === YT.PlayerState.PLAYING || st === YT.PlayerState.BUFFERING) player.pauseVideo();
-        if (Math.abs(cur - want) > 0.5) player.seekTo(want, true);
-      }
+      if (!state || !playerReady || loadedId === state.v) return;
+      loadedId = state.v;
+      if (unlocked) player.loadVideoById(state.v, wantTime()); else player.cueVideoById(state.v, wantTime());
     }
+
+    // --- 每 0.2 秒校正一次：差很多就跳過去，差一點就微調速度追上 ---
+    const pos = makePosEstimator(() => player);
+    let busyUntil = 0, correcting = null, seekLead = 0.2, checkLead = false;
+    function nearestRate(target, base) {
+      const list = (player.getAvailablePlaybackRates && player.getAvailablePlaybackRates()) || [];
+      let best = null;
+      for (const r of list) if (r !== base && (best === null || Math.abs(r - target) < Math.abs(best - target))) best = r;
+      return best;
+    }
+    setInterval(() => {
+      if (!state || !playerReady || !unlocked || loadedId !== state.v) return;
+      const now = Date.now(), base = state.r || 1;
+      if (correcting || now < busyUntil) return;
+      if (player.getPlaybackRate() !== base) { player.setPlaybackRate(base); busyUntil = now + 900; return; }
+      const st = player.getPlayerState();
+      if (state.s !== 'play') {
+        if (st === 1 || st === 3) player.pauseVideo();
+        if (Math.abs(player.getCurrentTime() - state.t) > 0.04) player.seekTo(state.t, true);
+        busyUntil = now + 300; return;
+      }
+      if (st !== 1 && st !== 3) { player.seekTo(wantTime() + seekLead, true); player.playVideo(); checkLead = true; busyUntil = now + 1500; return; }
+      if (st === 3) return; // 緩衝中
+      const p = pos();
+      if (!p.good) return;
+      const d = p.t - wantTime(); // 正＝我比主持人快
+      if (checkLead) { seekLead = Math.min(2, Math.max(0, seekLead - d)); checkLead = false; } // 學習跳轉要提前多少
+      if (Math.abs(d) > 1) { player.seekTo(wantTime() + seekLead, true); checkLead = true; busyUntil = now + 1500; return; }
+      if (Math.abs(d) < 0.03 || clockOffset === null || state.g === false) return;
+      const r = nearestRate(base * (d > 0 ? 0.9 : 1.1), base);
+      if (r === null || (d > 0) !== (r < base)) return;
+      player.setPlaybackRate(r);
+      correcting = true;
+      setTimeout(() => { player.setPlaybackRate(base); correcting = false; busyUntil = Date.now() + 900; },
+                 Math.min(4000, Math.abs(d) / Math.abs(r - base) * 1000));
+    }, 200);
 
     ytReady.then(() => {
       player = new YT.Player('viewerPlayer', {
         playerVars: { ...playerVars, controls: 0, disablekb: 1 },
-        events: { onReady: () => { playerReady = true; if (unlocked) { player.unMute(); player.setVolume(100); } apply(); } },
+        events: { onReady: () => { playerReady = true; if (unlocked) { player.unMute(); player.setVolume(100); } onState(); } },
       });
     });
+
+    // 全螢幕：Android 用真的全螢幕＋鎖橫向；iPhone 不支援，就用畫面鋪滿＋旋轉
+    const root = document.documentElement;
+    const isFs = () => document.fullscreenElement || document.webkitFullscreenElement;
+    $('fsBtn').onclick = async () => {
+      document.body.classList.add('fs');
+      try {
+        if (root.requestFullscreen) await root.requestFullscreen({ navigationUI: 'hide' });
+        else if (root.webkitRequestFullscreen) root.webkitRequestFullscreen();
+        if (screen.orientation && screen.orientation.lock) await screen.orientation.lock('landscape');
+      } catch {}
+    };
+    $('fsExit').onclick = () => {
+      document.body.classList.remove('fs');
+      try { if (isFs()) (document.exitFullscreen || document.webkitExitFullscreen).call(document); } catch {}
+    };
+    const onFsChange = () => { if (!isFs()) document.body.classList.remove('fs'); };
+    document.addEventListener('fullscreenchange', onFsChange);
+    document.addEventListener('webkitfullscreenchange', onFsChange);
 
     $('tapBtn').onclick = () => {
       $('tap').classList.add('hidden');
@@ -244,7 +333,6 @@
       if (playerReady) {
         // 在使用者點擊的這一刻先播一下，之後手機才允許自動播放有聲音
         player.unMute(); player.setVolume(100); player.playVideo();
-        setTimeout(apply, 300);
       }
     };
   }
