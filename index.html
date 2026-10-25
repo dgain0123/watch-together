@@ -486,7 +486,8 @@ window.addEventListener('error', e => { const el = document.getElementById('err'
   if (params.get('room')) {
     startViewer(params.get('room'));
   } else {
-    let room = params.get('host') || safeGet('wt_host_room');
+    // 以這支手機記住的房號為準：主畫面 App 會一直打開「加入當下的網址」，網址裡可能是已經結束的舊房號
+    let room = safeGet('wt_host_room') || params.get('host');
     if (!room) room = randId(6);
     safeSet('wt_host_room', room);
     if (params.get('host') !== room) history.replaceState(null, '', '?host=' + room);

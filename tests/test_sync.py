@@ -169,6 +169,9 @@ async def main():
             await asyncio.sleep(2)
             new_room = h.url.split("host=")[1]
             check(f"主持人自動換成新房間（{room}→{new_room}）且有提示", new_room != room and "失效" in await h.inner_text("#endHint"))
+            # 主畫面 App 情境：用「舊網址」重新打開主持人頁面，也要自動換到新房間、不能讓舊房間復活
+            await h.goto(U + "?host=" + room, wait_until="domcontentloaded"); await asyncio.sleep(2)
+            check(f"用舊網址打開主持人頁面→自動用新房間（{h.url.split('host=')[1]}）", h.url.split("host=")[1] == new_room)
             late = await (await b.new_context(**mob)).new_page()
             await late.goto(U + "?room=" + room, wait_until="domcontentloaded"); await asyncio.sleep(4)
             check("結束後才掃舊 QR code 的人只看到已結束", await late.is_visible("#ended"))
