@@ -38,6 +38,15 @@ async def host_play(h):
         await asyncio.sleep(0.5)
     raise RuntimeError("主持人影片播不起來")
 
+async def median_diff(h, v, n=6, gap=0.8):
+    """連續量幾次取中間值（跳轉校正的瞬間會停頓一下，單拍一張不準）"""
+    xs = []
+    for _ in range(n):
+        x = await diff_ms(h, v)
+        if x is not None: xs.append(x)
+        await asyncio.sleep(gap)
+    return sorted(xs)[len(xs) // 2] if xs else None
+
 async def wait_stable(h, vs, secs=8):
     await asyncio.sleep(secs)
     return [await diff_ms(h, v) for v in vs]
@@ -132,17 +141,19 @@ async def main():
             bp = await (await b.new_context(**mob)).new_page()
             await bp.goto(U + "?room=" + room, wait_until="domcontentloaded")
             await asyncio.sleep(4)
-            await bp.evaluate("(()=>{const p=__wt.player; window.__o=[p.playVideo,p.seekTo]; p.playVideo=()=>{}; p.seekTo=()=>{};})()")  # 模擬 iPhone：網頁叫播放、跳轉都沒反應
+            # 模擬 iOS 12 實測：叫播放沒反應、播放器一直「還沒開始」，但跳轉會讓時間數字跟著變
+            await bp.evaluate("""(()=>{const p=__wt.player; window.__o=[p.playVideo,p.seekTo,p.getCurrentTime,p.getPlayerState];
+              let fake=0; p.playVideo=()=>{}; p.seekTo=(t)=>{fake=t}; p.getCurrentTime=()=>fake; p.getPlayerState=()=>-1;})()""")
             await bp.click("#tapBtn")
             ok = False
             for _ in range(16):
                 await asyncio.sleep(0.5)
                 if await bp.is_visible("#tapHint"): ok = True; break
             check("播放被手機擋住→出現「請直接點一下影片」且遮罩拿掉", ok and not await bp.is_visible("#shield"))
-            await bp.evaluate("(()=>{const p=__wt.player; p.playVideo=__o[0]; p.seekTo=__o[1];})()")
+            await bp.evaluate("(()=>{const p=__wt.player; p.playVideo=__o[0]; p.seekTo=__o[1]; p.getCurrentTime=__o[2]; p.getPlayerState=__o[3];})()")
             await host_play(bp)  # 觀眾自己點影片（同一個「重試到真的在播」）
-            await asyncio.sleep(8)
-            dd = await diff_ms(h, bp)
+            await asyncio.sleep(5)
+            dd = await median_diff(h, bp)
             check(f"觀眾自己點影片後遮罩蓋回、照常同步（{dd}）", not await bp.is_visible("#tapHint") and await bp.is_visible("#shield") and dd is not None and abs(dd) < TOL_MS)
 
             # Safari 核心的觀眾（改速度沒效果的那種）也要對得上
@@ -150,8 +161,8 @@ async def main():
             wv = await (await wb.new_context(**mob)).new_page()
             await wv.goto(U + "?room=" + room, wait_until="domcontentloaded"); await asyncio.sleep(4)
             await wv.tap("#tapBtn")
-            await asyncio.sleep(16)
-            dw = await diff_ms(h, wv)
+            await asyncio.sleep(12)
+            dw = await median_diff(h, wv)
             if dw is None or abs(dw) >= 100:
                 print("  Safari 觀眾診斷:", await video(wv), await video(h), await wv.inner_text("#viewerStatus"), await wv.inner_text("#err"),
                       await wv.evaluate("(()=>{const p=__wt.player;return p&&p.getPlayerState?{st:p.getPlayerState(),ct:p.getCurrentTime(),rw:__wt.rateWorks,dt:__wt.directTap}:null})()"), "tap可見", await wv.is_visible("#tap"))
@@ -188,5 +199,5 @@ async def main():
     finally:
         srv.kill()
 
-asyncio.run(asyncio.wait_for(main(), 180))  # 最多 3 分鐘，不准卡死
+asyncio.run(asyncio.wait_for(main(), 300))  # 最多 5 分鐘，不准卡死
 sys.exit(1 if fails else 0)

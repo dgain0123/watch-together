@@ -8,8 +8,9 @@ def check(name, cond):
     if not cond: fails.append(name)
 
 # 外部程式庫一律寫死版本（不寫版本＝哪天自動更新就壞）
+# 程式庫放在自己網站（外部網站偶爾慢到網頁出不來），檔名帶版本
 srcs = re.findall(r'<script src="([^"]+)"', html)
-check("外部程式庫都有寫死版本", all(re.search(r"@\d+\.\d+\.\d+|/\d+\.\d+\.\d+/", s) for s in srcs) and len(srcs) == 2)
+check("程式庫都放在自己網站且檔名帶版本", len(srcs) == 2 and all(s.startswith("lib/") and re.search(r"-\d+\.\d+\.\d+\.min\.js$", s) and os.path.exists(os.path.join(ROOT, s)) for s in srcs))
 # 使用者裁示（2026-10-25）：靜音只由主持人控制，觀眾端不放靜音按鈕
 check("觀眾端沒有自己的靜音按鈕", "selfMute" not in html and "我要靜音" not in html)
 check("主持人有全部靜音開關", 'id="muteAll"' in html and "m: muteAll" in html)
@@ -36,7 +37,13 @@ try:
         check(f"第 {i+1} 段程式舊 iPhone 看得懂（ES2017）", ok)
 except ImportError:
     check("需要 esprima（pip3 install --user esprima）", False)
-check("連線程式庫用相容舊 iPhone 的 4.x 版", "mqtt@4." in html and "mqtt@5" not in html)
+check("連線程式庫用相容舊 iPhone 的 4.x 版", "lib/mqtt-4." in html)
+try:
+    for lib in srcs:
+        esprima.parseScript(open(os.path.join(ROOT, lib), encoding="utf-8").read()); 
+    check("程式庫本身舊 iPhone 也看得懂（ES2017）", True)
+except Exception as e:
+    check(f"程式庫本身舊 iPhone 也看得懂（ES2017）：{e}", False)
 css = html[html.index("<style>"):html.index("</style>")]
 check("版面不用舊 iPhone 不支援的 inset / aspect-ratio", "inset:" not in css and "aspect-ratio" not in css)
 sys.exit(1 if fails else 0)

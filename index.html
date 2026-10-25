@@ -107,8 +107,8 @@
   <div class="hint">手機規定要先點一下才能放出聲音</div>
 </div>
 
-<script src="https://unpkg.com/mqtt@4.3.8/dist/mqtt.min.js"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+<script src="lib/mqtt-4.3.8.min.js"></script>
+<script src="lib/qrcode-1.0.0.min.js"></script>
 <script>
 window.addEventListener('error', e => { const el = document.getElementById('err'); if (el) el.textContent += '出錯了：' + e.message + '\n'; });
 (() => {
@@ -344,24 +344,29 @@ window.addEventListener('error', e => { const el = document.getElementById('err'
     }
 
     // --- 每 0.2 秒校正一次：差很多就跳過去，差一點就微調速度追上 ---
-    window.__wt = { get player() { return player; }, get clockOffset() { return clockOffset; }, get rateWorks() { return rateWorks; }, get directTap() { return directTap; } }; // 給測試看內部狀態
+    window.__wt = { get player() { return player; }, get clockOffset() { return clockOffset; }, get rateWorks() { return rateWorks; }, get directTap() { return directTap; }, get seekLead() { return seekLead; }, log: [] }; // 給測試看內部狀態
     const pos = makePosEstimator(() => player);
     let busyUntil = 0, correcting = null, seekLead = 0.2, checkLead = false;
     let directTap = false, lastCt = -1, stuckSince = 0;
     // 該播卻 2.5 秒都沒前進（不管播放器回報什麼狀態、甚至播放器沒準備好）＝手機擋住了 → 請觀眾直接點影片
     setInterval(() => {
       if (!state || state.end || !unlocked || state.s !== 'play') { stuckSince = 0; return; }
-      let ct = -1; try { if (playerReady) ct = player.getCurrentTime(); } catch (e) {}
+      // 要「播放器說在播」而且時間真的往前走才算（網頁自己跳轉也會讓時間變，iOS 12 實測被騙過）
+      let ct = -1, st = null; try { if (playerReady) { ct = player.getCurrentTime(); st = player.getPlayerState(); } } catch (e) {}
       const now = Date.now();
-      if (ct > 0 && ct !== lastCt) {
+      if (st === 1 && ct > lastCt && lastCt >= 0) {
         lastCt = ct; stuckSince = 0;
-        if (directTap && player.getPlayerState() === 1) { setDirectTap(false); gestured = true; updateSound(); }
+        if (directTap) { setDirectTap(false); gestured = true; updateSound(); }
         return;
       }
+      lastCt = ct;
       if (!stuckSince) stuckSince = now;
       else if (now - stuckSince > 2500 && !directTap) setDirectTap(true);
     }, 500);
-    let rateWorks = true, rateFails = 0, lastCorr = null; // Safari 上改速度常常沒效果，沒效就改用跳轉
+    // iPhone／Safari 改播放速度的反應不可預測（沒效或反效果），一開始就只用跳轉校正；其他瀏覽器微調沒效也會自動改用跳轉
+    const ua = navigator.userAgent;
+    const isSafariLike = /iPhone|iPad|iPod/.test(ua) || (/Safari/.test(ua) && !/Chrome|Chromium|Android|Edg/.test(ua));
+    let rateWorks = !isSafariLike, rateFails = 0, lastCorr = null;
     function setDirectTap(on) {
       directTap = on;
       $('shield').classList.toggle('off', on);
@@ -389,13 +394,14 @@ window.addEventListener('error', e => { const el = document.getElementById('err'
       const p = pos();
       if (!p.good) return;
       const d = p.t - wantTime(); // 正＝我比主持人快
+      window.__wt.log.push([now % 100000, Math.round(d * 1000), Math.round(seekLead * 1000), rateWorks ? 1 : 0]); if (window.__wt.log.length > 200) window.__wt.log.shift();
       if (checkLead) { seekLead = Math.min(2, Math.max(0, seekLead - d)); checkLead = false; } // 學習跳轉要提前多少
       if (lastCorr !== null) { // 上一次微調速度有沒有效？（只看夠大的差距，小差距量不準）
         if (Math.abs(lastCorr) > 0.08) rateFails = Math.abs(d) > Math.abs(lastCorr) * 0.7 ? rateFails + 1 : 0;
-        if (rateFails >= 3) rateWorks = false;
+        if (rateFails >= 2) rateWorks = false;
         lastCorr = null;
       }
-      const jumpAt = rateWorks ? 1 : 0.08;
+      const jumpAt = rateWorks ? 0.3 : 0.05; // 差很多直接跳；小差距才微調速度
       if (Math.abs(d) > jumpAt) { player.seekTo(wantTime() + seekLead, true); checkLead = true; busyUntil = now + 1500; return; }
       if (!rateWorks || Math.abs(d) < 0.03 || clockOffset === null || state.g === false) return;
       const r = nearestRate(base * (d > 0 ? 0.9 : 1.1), base);
