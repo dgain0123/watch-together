@@ -64,6 +64,10 @@ async def main():
             andr = {k: v for k, v in pw.devices["Pixel 5"].items() if k != "default_browser_type"}  # Chrome 觀眾＝Android 流程
             h = await (await b.new_context(**mob)).new_page()
             await h.goto(U + "?host=" + room, wait_until="domcontentloaded")
+            dialogs = []
+            def on_dialog(dlg):
+                dialogs.append(dlg.message); asyncio.ensure_future(dlg.accept())
+            h.on("dialog", on_dialog)
             await asyncio.sleep(3)
             check("主持人連上訊息伺服器", "已連線" in await h.inner_text("#hostStatus"))
             # 一鍵貼上並播放：模擬在 YouTube 按「複製連結」的分享文字
@@ -167,7 +171,12 @@ async def main():
             await wv.goto(U + "?room=" + room, wait_until="domcontentloaded"); await asyncio.sleep(4)
             # iPhone 流程：沒有「點我開始觀看」按鈕，一開始就請觀眾直接點影片
             check("iPhone 觀眾一開始就出現「點一下影片開始一起看」且沒有按鈕遮罩",
-                  await wv.is_visible("#tapHint") and "開始一起看" in await wv.inner_text("#tapHint") and not await wv.is_visible("#tap") and not await wv.is_visible("#shield"))
+                  await wv.is_visible("#tapHint") and "▶ 播放鍵" in await wv.inner_text("#tapHint") and not await wv.is_visible("#tap") and not await wv.is_visible("#shield"))
+            ok = False
+            for _ in range(10):
+                if "1 位 iPhone 觀眾" in await h.inner_text("#hostStatus"): ok = True; break
+                await asyncio.sleep(0.5)
+            check("主持人畫面顯示「有 1 位 iPhone 觀眾要點 ▶」", ok)
             await wv.click("#viewerWrap")  # 觀眾用手指點影片正中間（點進 YouTube 播放器）
             for _ in range(20):
                 V = await video(wv)
@@ -179,6 +188,18 @@ async def main():
                 await asyncio.sleep(0.5)
             if not ok: print("  iPhone 診斷:", await wv.is_visible("#tapHint"), await wv.is_visible("#shield"), await video(wv), await wv.evaluate("(()=>{const p=__wt.player;return {st:p.getPlayerState(),dt:__wt.directTap}})()"))
             check("iPhone 觀眾點了影片→紅框消失、遮罩蓋回、有聲音", ok)
+            ok = False
+            for _ in range(10):
+                if "iPhone 觀眾" not in await h.inner_text("#hostStatus"): ok = True; break
+                await asyncio.sleep(0.5)
+            check("iPhone 觀眾點完後主持人畫面的提醒消失", ok)
+            # 主持人從靜音切成有聲音：有 iPhone 觀眾時先跳確認，同一場只問一次
+            await h.click("#muteAll"); await asyncio.sleep(1)   # 有聲音→靜音（不用問）
+            n0 = len(dialogs)
+            await h.click("#muteAll"); await asyncio.sleep(1)   # 靜音→有聲音（要問）
+            await h.click("#muteAll"); await asyncio.sleep(1)
+            await h.click("#muteAll"); await asyncio.sleep(1)   # 第二次靜音→有聲音（不再問）
+            check(f"切成有聲音前跳確認且同一場只問一次（{len(dialogs) - n0} 次）", len(dialogs) - n0 == 1 and "iPhone" in dialogs[-1])
             await asyncio.sleep(12)
             dw = await median_diff(h, wv)
             if dw is None or abs(dw) >= 100:
@@ -188,7 +209,6 @@ async def main():
             check(f"Safari 核心的觀眾也同步 < 100ms（{dw}）", dw is not None and abs(dw) < 100)
 
             # 結束放映＝全部失效：觀眾停止並斷線、舊 QR code 作廢、主持人換新 QR code
-            h.on("dialog", lambda dlg: asyncio.ensure_future(dlg.accept()))
             await h.click("#endShow")
             ok = False
             for _ in range(12):

@@ -195,15 +195,18 @@ window.addEventListener('error', e => { const el = document.getElementById('err'
     let player = null, videoId = null;
 
     const net = connectAll(room, (sub, msg) => {
-      if (sub === 'hello' && msg.id) viewers.set(msg.id, Date.now());
+      if (sub === 'hello' && msg.id) { viewers.set(msg.id, { t: Date.now(), ios: !!msg.ios, waiting: !!msg.waiting }); refreshStatus(); }
       if (sub === 'ping' && msg.id) net.publish('pong/' + msg.id, { t0: msg.t0, th: Date.now() }); // 讓觀眾對時
     }, refreshStatus);
 
     function refreshStatus() {
       const now = Date.now();
-      for (const [id, t] of viewers) if (now - t > 12000) viewers.delete(id);
+      for (const [id, v] of viewers) if (now - v.t > 12000) viewers.delete(id);
       const ok = net && net.connectedCount() > 0;
-      $('hostStatus').innerHTML = ok ? `<b>已連線</b>　目前有 ${viewers.size} 人在看` : '連線中…（如果一直連不上，請檢查網路）';
+      let waiting = 0; for (const v of viewers.values()) if (v.ios && v.waiting) waiting++;
+      $('hostStatus').innerHTML = ok
+        ? `<b>已連線</b>　目前有 ${viewers.size} 人在看` + (waiting ? `<br>⚠️ 有 ${waiting} 位 iPhone 觀眾要點一下影片中間的 ▶ 播放鍵才能繼續` : '')
+        : '連線中…（如果一直連不上，請檢查網路）';
     }
     setInterval(refreshStatus, 3000);
 
@@ -213,7 +216,15 @@ window.addEventListener('error', e => { const el = document.getElementById('err'
       $('muteAllHint').textContent = muteAll ? '只有你的手機出聲音，適合大家在同一個房間。觀眾掃了就直接開始看，不用按任何東西。' : '大家在同一個房間的話，建議打開「觀眾全部靜音」，才不會有回音。';
     }
     showMuteAll();
-    $('muteAll').onclick = () => { muteAll = !muteAll; safeSet('wt_mute_all', muteAll ? '1' : '0'); showMuteAll(); sendState(); };
+    let skipSoundConfirm = false;
+    $('muteAll').onclick = () => {
+      // 從靜音切成有聲音：iPhone 觀眾的影片會先停住（蘋果規定），先問主持人
+      let ios = 0; for (const v of viewers.values()) if (v.ios) ios++;
+      if (muteAll && ios && !skipSoundConfirm) {
+        if (!confirm(`切成有聲音時，${ios} 位 iPhone 觀眾的影片會先停住，要他們點一下 ▶ 播放鍵才會帶聲音繼續播（蘋果的規定）。\n\n確定要切換嗎？（這場之後不會再問）`)) return;
+        skipSoundConfirm = true;
+      }
+      muteAll = !muteAll; safeSet('wt_mute_all', muteAll ? '1' : '0'); showMuteAll(); sendState(); };
 
     // 結束放映：通知觀眾結束並斷線，這個房間永久作廢；主持人自動換新房間（新 QR code）
     let ended = false;
@@ -317,8 +328,9 @@ window.addEventListener('error', e => { const el = document.getElementById('err'
       onState();
       updateSound();
     }, refreshStatus);
-    setInterval(() => net.publish('hello', { id: myId }), 5000);
-    net.publish('hello', { id: myId });
+    function sayHello() { net.publish('hello', { id: myId, ios: isSafariLike, waiting: directTap }); }
+    setInterval(sayHello, 5000);
+    setTimeout(sayHello, 300); // 等下面的變數都建立好再報到
     setTimeout(ping, 500);
 
     function refreshStatus() {
@@ -352,6 +364,7 @@ window.addEventListener('error', e => { const el = document.getElementById('err'
     const pos = makePosEstimator(() => player);
     let busyUntil = 0, correcting = null, seekLead = 0.2, checkLead = false;
     let directTap = false, lastCt = -1, stuckSince = 0, seekCount = 0;
+    const stateEvents = []; // 播放器狀態事件 [時刻, 狀態]，看觀眾點擊後幾秒內發生什麼
     const trail = []; // 最近 10 秒的狀態，給回報用（中間漏收幾筆也看得出來發生什麼事）
     setInterval(() => {
       let st = null, ct = null, mu = null;
@@ -379,13 +392,15 @@ window.addEventListener('error', e => { const el = document.getElementById('err'
     function setDirectTap(on) {
       directTap = on;
       // iOS：網頁替觀眾開聲音時會把影片暫停，要觀眾自己點影片才能有聲音播放
+      // 只有點 YouTube 自己的 ▶ 播放鍵才算觀眾的手勢（點我們網頁不算，AI 會議 2026-10-25 結論）
       $('tapHint').innerHTML = !unlocked
-        ? '👆 請用手指點一下上面影片的正中間<br>開始一起看'
+        ? '👆 請點一下上面影片中間的 ▶ 播放鍵<br>開始一起看'
         : state && !state.m
-        ? '🔊 要聽到聲音<br>請用手指點一下上面影片的正中間'
-        : '👆 影片沒有自動開始<br>請用手指點一下上面影片的正中間';
+        ? '🔊 主持人開聲音了<br>請點一下上面影片中間的 ▶ 播放鍵，就會有聲音繼續播'
+        : '👆 影片停住了<br>請點一下上面影片中間的 ▶ 播放鍵';
       $('shield').classList.toggle('off', on);
       $('tapHint').classList.toggle('hidden', !on);
+      if (typeof sayHello === 'function') sayHello(); // 馬上讓主持人知道誰在等點擊
     }
     if (isSafariLike) setDirectTap(true); // iPhone 一開始就請觀眾直接點影片
     function nearestRate(target, base) {
@@ -456,7 +471,7 @@ window.addEventListener('error', e => { const el = document.getElementById('err'
         playerReady, unlocked, gestured, directTap, st, ct, muted, loadedId,
         state: state && { s: state.s, t: state.t, v: state.v, m: state.m, end: state.end },
         shieldOff: $('shield').classList.contains('off'), tapShown: !$('tap').classList.contains('hidden'),
-        trail: trail.slice(), conns: net.connectedCount(), seeks: seekCount, rateWorks: rateWorks,
+        trail: trail.slice(), events: stateEvents.slice(), conns: net.connectedCount(), seeks: seekCount, rateWorks: rateWorks,
         errs: window.__errs, yt: typeof YT, iframe: !!document.querySelector('#viewerWrap iframe'),
         lowPower: null,
       });
@@ -468,6 +483,7 @@ window.addEventListener('error', e => { const el = document.getElementById('err'
         events: {
           onReady: () => { playerReady = true; updateSound(); onState(); },
           onStateChange: e => {
+            stateEvents.push([Math.round((Date.now() % 1e6) / 100) / 10, e.data]); if (stateEvents.length > 30) stateEvents.shift();
             if (e.data === 1 && directTap) { // 觀眾自己點影片播起來了 → 蓋回遮罩、交給同步
               setDirectTap(false); gestured = true; unlocked = true; $('tap').classList.add('hidden'); updateSound();
             }
