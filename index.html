@@ -23,21 +23,21 @@
   input { flex:1; min-width:0; font-size:16px; padding:12px; border-radius:10px; border:1px solid #333; background:#000; color:var(--fg); }
   button { font-size:16px; padding:12px 16px; border-radius:10px; border:0; background:var(--accent); color:#fff; font-weight:600; }
   button.secondary { background:#333; }
-  .player-wrap { position:relative; width:100%; aspect-ratio:16/9; background:#000; border-radius:12px; overflow:hidden; }
-  .player-wrap > div, .player-wrap iframe { position:absolute; inset:0; width:100%; height:100%; }
-  .shield { position:absolute; inset:0; z-index:2; }
-  #qr { background:#fff; padding:12px; border-radius:12px; width:fit-content; margin:8px auto; }
+  .player-wrap { position:relative; width:100%; height:0; padding-top:56.25%; background:#000; border-radius:12px; overflow:hidden; }
+  .player-wrap > div, .player-wrap iframe { position:absolute; top:0; right:0; bottom:0; left:0; width:100%; height:100%; }
+  .shield { position:absolute; top:0; right:0; bottom:0; left:0; z-index:2; }
+  #qr { background:#fff; padding:12px; border-radius:12px; width:-webkit-fit-content; width:fit-content; margin:8px auto; }
   #qr img, #qr canvas { display:block; width:220px; height:220px; }
   .link { word-break:break-all; color:var(--muted); font-size:13px; text-align:center; }
   .status { font-size:14px; color:var(--muted); margin:8px 0 0; }
   .status b { color:var(--ok); font-weight:600; }
   .hint { font-size:13px; color:var(--muted); line-height:1.6; }
-  #tap { position:fixed; inset:0; z-index:10; background:rgba(0,0,0,.85); display:flex; flex-direction:column; align-items:center; justify-content:center; gap:16px; text-align:center; padding:24px; }
+  #tap { position:fixed; top:0; right:0; bottom:0; left:0; z-index:10; background:rgba(0,0,0,.85); display:flex; flex-direction:column; align-items:center; justify-content:center; gap:16px; text-align:center; padding:24px; }
   #tap button { font-size:22px; padding:18px 32px; border-radius:16px; }
   .hidden { display:none !important; }
   .shield.off { display:none; }
   #tapHint { position:absolute; left:0; right:0; bottom:0; z-index:3; background:rgba(255,59,48,.92); color:#fff; text-align:center; padding:10px; font-size:17px; font-weight:600; pointer-events:none; }
-  #ended { position:fixed; inset:0; z-index:30; background:#000; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:12px; text-align:center; padding:24px; font-size:20px; }
+  #ended { position:fixed; top:0; right:0; bottom:0; left:0; z-index:30; background:#000; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:12px; text-align:center; padding:24px; font-size:20px; }
   button.danger { background:#5a1d1a; }
   #err { color:#ff6b6b; font-size:13px; white-space:pre-wrap; }
   button.big { width:100%; font-size:20px; padding:18px; border-radius:14px; }
@@ -45,10 +45,10 @@
   #fsExit { position:absolute; top:10px; right:10px; z-index:3; padding:8px 14px; font-size:15px; background:rgba(0,0,0,.55); display:none; }
   /* 全螢幕：鋪滿畫面；直拿手機時把影片轉 90 度 */
   body.fs { overflow:hidden; }
-  body.fs #viewerWrap { position:fixed; z-index:20; border-radius:0; aspect-ratio:auto; top:0; left:0; width:100vw; height:100dvh; }
+  body.fs #viewerWrap { position:fixed; z-index:20; border-radius:0; padding-top:0; top:0; left:0; width:100vw; height:100vh; height:100dvh; }
   body.fs #fsExit { display:block; }
   @media (orientation: portrait) {
-    body.fs #viewerWrap { width:100dvh; height:100vw; top:50%; left:50%; transform:translate(-50%,-50%) rotate(90deg); }
+    body.fs #viewerWrap { width:100vh; width:100dvh; height:100vw; top:50%; left:50%; transform:translate(-50%,-50%) rotate(90deg); }
   }
 </style>
 </head>
@@ -107,7 +107,7 @@
   <div class="hint">手機規定要先點一下才能放出聲音</div>
 </div>
 
-<script src="https://unpkg.com/mqtt@5.10.1/dist/mqtt.min.js"></script>
+<script src="https://unpkg.com/mqtt@4.3.8/dist/mqtt.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
 <script>
 window.addEventListener('error', e => { const el = document.getElementById('err'); if (el) el.textContent += '出錯了：' + e.message + '\n'; });
@@ -118,8 +118,8 @@ window.addEventListener('error', e => { const el = document.getElementById('err'
 
   const params = new URLSearchParams(location.search);
   const $ = id => document.getElementById(id);
-  const safeGet = k => { try { return localStorage.getItem(k); } catch { return null; } };
-  const safeSet = (k, v) => { try { localStorage.setItem(k, v); } catch {} };
+  const safeGet = k => { try { return localStorage.getItem(k); } catch (e) { return null; } };
+  const safeSet = (k, v) => { try { localStorage.setItem(k, v); } catch (e) {} };
   const randId = n => Array.from(crypto.getRandomValues(new Uint8Array(n)), b => 'abcdefghjkmnpqrstuvwxyz23456789'[b % 31]).join('');
 
   // ---------- 訊息連線 ----------
@@ -129,7 +129,7 @@ window.addEventListener('error', e => { const el = document.getElementById('err'
       c.on('connect', () => { c.subscribe(PREFIX + room + '/#'); onStatus(); });
       c.on('close', onStatus);
       c.on('message', (topic, payload, packet) => {
-        try { onMsg(topic.slice((PREFIX + room + '/').length), JSON.parse(payload.toString()), packet.retain); } catch {}
+        try { onMsg(topic.slice((PREFIX + room + '/').length), JSON.parse(payload.toString()), packet.retain); } catch (e) {}
       });
       return c;
     });
@@ -185,7 +185,7 @@ window.addEventListener('error', e => { const el = document.getElementById('err'
     $('joinLink').textContent = joinUrl;
     new QRCode($('qr'), { text: joinUrl, width: 440, height: 440, correctLevel: QRCode.CorrectLevel.M });
     $('copy').onclick = async () => {
-      try { await navigator.clipboard.writeText(joinUrl); $('copy').textContent = '已複製'; } catch { prompt('複製這個連結', joinUrl); }
+      try { await navigator.clipboard.writeText(joinUrl); $('copy').textContent = '已複製'; } catch (e) { prompt('複製這個連結', joinUrl); }
       setTimeout(() => $('copy').textContent = '複製連結', 1500);
     };
 
@@ -219,12 +219,12 @@ window.addEventListener('error', e => { const el = document.getElementById('err'
     $('endShow').onclick = () => {
       if (!confirm('結束放映？所有觀眾的畫面都會停掉，現在這個 QR code 會失效，下次要讓大家掃新的。')) return;
       ended = true;
-      try { player.stopVideo(); } catch {}
+      try { player.stopVideo(); } catch (e) {}
       sendState();
       $('endHint').textContent = '結束中…';
       setTimeout(() => {
         const r = randId(6); safeSet('wt_host_room', r);
-        try { sessionStorage.setItem('wt_just_ended', '1'); } catch {}
+        try { sessionStorage.setItem('wt_just_ended', '1'); } catch (e) {}
         location.replace('?host=' + r);
       }, 1500);
     };
@@ -233,7 +233,7 @@ window.addEventListener('error', e => { const el = document.getElementById('err'
         sessionStorage.removeItem('wt_just_ended');
         $('endHint').textContent = '上一場已結束，舊的 QR code 已經失效。這是新的 QR code，下次放映請大家掃這個。';
       }
-    } catch {}
+    } catch (e) {}
 
     const pos = makePosEstimator(() => player);
     function sendState() {
@@ -273,7 +273,7 @@ window.addEventListener('error', e => { const el = document.getElementById('err'
     // 一鍵：讀剪貼簿 → 播放
     $('pasteGo').onclick = async () => {
       let text = '';
-      try { text = await navigator.clipboard.readText(); } catch {}
+      try { text = await navigator.clipboard.readText(); } catch (e) {}
       if (!text) { $('url').focus(); alert('讀不到剪貼簿，請長按輸入框選「貼上」'); return; }
       if (!parseVideoId(text)) { alert('剪貼簿裡不是 YouTube 連結。請在 YouTube 按「分享」→「複製連結」再回來按'); return; }
       $('url').value = text.trim();
@@ -322,7 +322,7 @@ window.addEventListener('error', e => { const el = document.getElementById('err'
       $('viewerStatus').innerHTML = state && state.end ? '主持人已結束放映' : !ok ? '連線中…' : state ? '<b>已連線</b>　跟主持人同步中' : '<b>已連線</b>　等主持人選影片…';
     }
 
-    const hostNow = () => Date.now() + (clockOffset ?? (offsets.length ? Math.max(...offsets) + 50 : 0));
+    const hostNow = () => Date.now() + (clockOffset !== null ? clockOffset : (offsets.length ? Math.max.apply(null, offsets) + 50 : 0));
     // 主持人「現在」播到哪
     function wantTime() {
       if (state.s !== 'play') return state.t;
@@ -334,7 +334,7 @@ window.addEventListener('error', e => { const el = document.getElementById('err'
       refreshStatus();
       $('ended').classList.toggle('hidden', !(state && state.end));
       if (state && state.end) { // 這個房間永久結束：停播、斷線，之後不會再接上
-        try { if (playerReady) player.stopVideo(); } catch {}
+        try { if (playerReady) player.stopVideo(); } catch (e) {}
         loadedId = null; setDirectTap(false); $('tap').classList.add('hidden');
         net.close(); return;
       }
@@ -351,7 +351,7 @@ window.addEventListener('error', e => { const el = document.getElementById('err'
     // 該播卻 2.5 秒都沒前進（不管播放器回報什麼狀態、甚至播放器沒準備好）＝手機擋住了 → 請觀眾直接點影片
     setInterval(() => {
       if (!state || state.end || !unlocked || state.s !== 'play') { stuckSince = 0; return; }
-      let ct = -1; try { if (playerReady) ct = player.getCurrentTime(); } catch {}
+      let ct = -1; try { if (playerReady) ct = player.getCurrentTime(); } catch (e) {}
       const now = Date.now();
       if (ct > 0 && ct !== lastCt) {
         lastCt = ct; stuckSince = 0;
@@ -440,7 +440,7 @@ window.addEventListener('error', e => { const el = document.getElementById('err'
 
     ytReady.then(() => {
       player = new YT.Player('viewerPlayer', {
-        playerVars: { ...playerVars, controls: 0, disablekb: 1, mute: 1 },
+        playerVars: Object.assign({}, playerVars, { controls: 0, disablekb: 1, mute: 1 }),
         events: {
           onReady: () => { playerReady = true; updateSound(); onState(); },
           onStateChange: e => {
@@ -461,11 +461,11 @@ window.addEventListener('error', e => { const el = document.getElementById('err'
         if (root.requestFullscreen) await root.requestFullscreen({ navigationUI: 'hide' });
         else if (root.webkitRequestFullscreen) root.webkitRequestFullscreen();
         if (screen.orientation && screen.orientation.lock) await screen.orientation.lock('landscape');
-      } catch {}
+      } catch (e) {}
     };
     $('fsExit').onclick = () => {
       document.body.classList.remove('fs');
-      try { if (isFs()) (document.exitFullscreen || document.webkitExitFullscreen).call(document); } catch {}
+      try { if (isFs()) (document.exitFullscreen || document.webkitExitFullscreen).call(document); } catch (e) {}
     };
     const onFsChange = () => { if (!isFs()) document.body.classList.remove('fs'); };
     document.addEventListener('fullscreenchange', onFsChange);

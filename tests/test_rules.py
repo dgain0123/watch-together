@@ -24,4 +24,19 @@ check("有一鍵貼上並播放按鈕", 'id="pasteGo"' in html and "clipboard.re
 # 使用者裁示（2026-10-25）：按結束放映後全部失效（觀眾斷線不再接、主持人換新 QR code）
 check("有結束放映按鈕", 'id="endShow"' in html and "net.close()" in html and "wt_just_ended" in html)
 check("錯誤會顯示在手機畫面上", 'id="err"' in html and "addEventListener('error'" in html)
+# 2026-10-25 使用者的觀眾 iPhone 系統舊（iOS 13.4 以前），看不懂 ?? 等新寫法 → 整頁黑畫面。
+# 網頁內的程式一律要能被只懂 ES2017 的解析器讀懂；外部程式庫也要用舊版相容版本。
+try:
+    import esprima
+    for i, js in enumerate(re.findall(r"<script>(.*?)</script>", html, re.S)):
+        try:
+            esprima.parseScript(js); ok = True
+        except Exception as e:
+            ok = False; print("   ", e)
+        check(f"第 {i+1} 段程式舊 iPhone 看得懂（ES2017）", ok)
+except ImportError:
+    check("需要 esprima（pip3 install --user esprima）", False)
+check("連線程式庫用相容舊 iPhone 的 4.x 版", "mqtt@4." in html and "mqtt@5" not in html)
+css = html[html.index("<style>"):html.index("</style>")]
+check("版面不用舊 iPhone 不支援的 inset / aspect-ratio", "inset:" not in css and "aspect-ratio" not in css)
 sys.exit(1 if fails else 0)

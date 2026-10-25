@@ -152,10 +152,11 @@ async def main():
             await wv.tap("#tapBtn")
             await asyncio.sleep(16)
             dw = await diff_ms(h, wv)
-            if dw is None or abs(dw) >= TOL_MS:
+            if dw is None or abs(dw) >= 100:
                 print("  Safari 觀眾診斷:", await video(wv), await video(h), await wv.inner_text("#viewerStatus"), await wv.inner_text("#err"),
                       await wv.evaluate("(()=>{const p=__wt.player;return p&&p.getPlayerState?{st:p.getPlayerState(),ct:p.getCurrentTime(),rw:__wt.rateWorks,dt:__wt.directTap}:null})()"), "tap可見", await wv.is_visible("#tap"))
-            check(f"Safari 核心的觀眾也同步（{dw}）", dw is not None and abs(dw) < TOL_MS)
+            # Safari 只能用跳轉校正（差 0.08 秒以上才跳，太常跳畫面會頓），所以標準放 0.1 秒
+            check(f"Safari 核心的觀眾也同步 < 100ms（{dw}）", dw is not None and abs(dw) < 100)
 
             # 結束放映＝全部失效：觀眾停止並斷線、舊 QR code 作廢、主持人換新 QR code
             h.on("dialog", lambda dlg: asyncio.ensure_future(dlg.accept()))
