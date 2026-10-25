@@ -16,4 +16,7 @@ check("主持人有全部靜音開關", 'id="muteAll"' in html and "m: muteAll" 
 # 兩台訊息伺服器同時連，一台掛了還能用
 check("同時連兩台訊息伺服器", html.count("wss://") >= 2)
 check("觀眾有全螢幕按鈕", 'id="fsBtn"' in html and 'id="fsExit"' in html)
+# 使用者裁示（2026-10-25）：主持人網頁的 QR code 放在最上面（標題下第一塊）
+host = html[html.index('<section id="host"'):html.index('</section>')]
+check("主持人網頁 QR code 在最上面", host.index('id="qr"') < host.index('id="url"') < host.index('id="hostPlayer"'))
 sys.exit(1 if fails else 0)

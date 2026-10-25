@@ -72,7 +72,7 @@ async def main():
             check("觀眾點過開始後有聲音", V and not V["muted"])
 
             await hf.evaluate("(()=>{const v=document.querySelector('video');v.currentTime+=20})()")
-            d = await wait_stable(h, vs, 6)
+            d = await wait_stable(h, vs, 9)  # 跳轉後偶爾要 6 秒以上才收斂
             check(f"主持人跳 20 秒後跟上：{d}", all(x is not None and abs(x) < TOL_MS for x in d))
 
             await hf.evaluate("document.querySelector('video').pause()")
@@ -92,8 +92,10 @@ async def main():
             check(f"全部靜音時新觀眾不用點就開始播（靜音、同步 {dn}）",
                   N and not N["paused"] and N["muted"] and not await nv.is_visible("#tap") and dn is not None and abs(dn) < TOL_MS)
             await h.click("#muteAll")
-            await asyncio.sleep(2)
-            Vs = [await video(v) for v in vs]
+            for _ in range(12):  # 公開訊息伺服器偶爾慢到 2 秒以上，最多等 6 秒
+                await asyncio.sleep(0.5)
+                Vs = [await video(v) for v in vs]
+                if all(not x["muted"] for x in Vs) and await nv.is_visible("#tap"): break
             check("關掉全部靜音→點過的觀眾恢復聲音", all(not x["muted"] for x in Vs))
             check("關掉全部靜音→沒點過的觀眾跳出「點一下聽聲音」", await nv.is_visible("#tap"))
             await nv.click("#tapBtn"); await asyncio.sleep(1.5)

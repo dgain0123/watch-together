@@ -44,6 +44,15 @@
   <section id="host" class="hidden">
     <h1>一起看 YouTube（主持人）</h1>
     <div class="card">
+      <div class="hint" style="text-align:center">請大家用手機相機掃這個 QR code</div>
+      <div id="qr"></div>
+      <div class="link" id="joinLink"></div>
+      <div class="row" style="justify-content:center;margin-top:10px">
+        <button class="secondary" id="copy">複製連結</button>
+        <button class="secondary" id="newRoom">換一個新房間</button>
+      </div>
+    </div>
+    <div class="card">
       <div class="row">
         <input id="url" placeholder="貼上 YouTube 影片連結" autocomplete="off">
         <button id="go">播放</button>
@@ -55,15 +64,6 @@
     <div class="card">
       <div class="player-wrap"><div id="hostPlayer"></div></div>
       <p class="hint">直接在影片上按播放、暫停、拖進度條，大家的手機都會跟著動。</p>
-    </div>
-    <div class="card">
-      <div class="hint" style="text-align:center">請大家用手機相機掃這個 QR code</div>
-      <div id="qr"></div>
-      <div class="link" id="joinLink"></div>
-      <div class="row" style="justify-content:center;margin-top:10px">
-        <button class="secondary" id="copy">複製連結</button>
-        <button class="secondary" id="newRoom">換一個新房間</button>
-      </div>
     </div>
   </section>
 
