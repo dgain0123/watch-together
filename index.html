@@ -351,7 +351,14 @@ window.addEventListener('error', e => { const el = document.getElementById('err'
     window.__wt = { get player() { return player; }, get clockOffset() { return clockOffset; }, get rateWorks() { return rateWorks; }, get directTap() { return directTap; }, get seekLead() { return seekLead; }, log: [] }; // 給測試看內部狀態
     const pos = makePosEstimator(() => player);
     let busyUntil = 0, correcting = null, seekLead = 0.2, checkLead = false;
-    let directTap = false, lastCt = -1, stuckSince = 0;
+    let directTap = false, lastCt = -1, stuckSince = 0, seekCount = 0;
+    const trail = []; // 最近 10 秒的狀態，給回報用（中間漏收幾筆也看得出來發生什麼事）
+    setInterval(() => {
+      let st = null, ct = null, mu = null;
+      try { if (playerReady) { st = player.getPlayerState(); ct = Math.round(player.getCurrentTime() * 10) / 10; mu = player.isMuted() ? 1 : 0; } } catch (e) {}
+      trail.push([Math.round((Date.now() % 1e6) / 100) / 10, st, ct, mu, state ? (state.m ? 1 : 0) : null, state ? state.s : null, directTap ? 1 : 0, seekCount]);
+      if (trail.length > 20) trail.shift();
+    }, 500);
     // 該播卻 2.5 秒都沒前進（不管播放器回報什麼狀態、甚至播放器沒準備好）＝手機擋住了 → 請觀眾直接點影片
     setInterval(() => {
       if (!state || state.end || !unlocked || state.s !== 'play') { stuckSince = 0; return; }
@@ -398,7 +405,8 @@ window.addEventListener('error', e => { const el = document.getElementById('err'
         if (Math.abs(player.getCurrentTime() - state.t) > 0.04) player.seekTo(state.t, true);
         busyUntil = now + 300; return;
       }
-      if (st !== 1 && st !== 3) { player.seekTo(wantTime() + seekLead, true); player.playVideo(); checkLead = true; busyUntil = now + 1500; return; }
+      if (directTap) return; // 等觀眾自己點影片；一直跳轉只會讓字幕在跑、畫面卻是黑的（iOS 12 實測）
+      if (st !== 1 && st !== 3) { player.seekTo(wantTime() + seekLead, true); player.playVideo(); checkLead = true; busyUntil = now + 1500; seekCount++; return; }
       if (st === 3) return; // 緩衝中
       const p = pos();
       if (!p.good) return;
@@ -411,7 +419,7 @@ window.addEventListener('error', e => { const el = document.getElementById('err'
         lastCorr = null;
       }
       const jumpAt = rateWorks ? 0.3 : 0.05; // 差很多直接跳；小差距才微調速度
-      if (Math.abs(d) > jumpAt) { player.seekTo(wantTime() + seekLead, true); checkLead = true; busyUntil = now + 1500; return; }
+      if (Math.abs(d) > jumpAt) { player.seekTo(wantTime() + seekLead, true); checkLead = true; busyUntil = now + 1500; seekCount++; return; }
       if (!rateWorks || Math.abs(d) < 0.03 || clockOffset === null || state.g === false) return;
       const r = nearestRate(base * (d > 0 ? 0.9 : 1.1), base);
       if (r === null || (d > 0) !== (r < base)) return;
@@ -448,6 +456,7 @@ window.addEventListener('error', e => { const el = document.getElementById('err'
         playerReady, unlocked, gestured, directTap, st, ct, muted, loadedId,
         state: state && { s: state.s, t: state.t, v: state.v, m: state.m, end: state.end },
         shieldOff: $('shield').classList.contains('off'), tapShown: !$('tap').classList.contains('hidden'),
+        trail: trail.slice(), conns: net.connectedCount(), seeks: seekCount, rateWorks: rateWorks,
         errs: window.__errs, yt: typeof YT, iframe: !!document.querySelector('#viewerWrap iframe'),
         lowPower: null,
       });

@@ -31,7 +31,7 @@ async def host_play(h):
     for _ in range(40):
         try:
             hf = [f for f in h.frames if "youtube.com/embed" in f.url][0]
-            ok = await hf.evaluate("(async()=>{const v=document.querySelector('video');if(!v)return false;try{await v.play()}catch(e){};return !v.paused&&v.currentTime>0})()")
+            ok = await hf.evaluate("(()=>{const v=document.querySelector('video');if(!v)return false;try{const p=v.play();if(p&&p.catch)p.catch(()=>{})}catch(e){};return !v.paused&&v.currentTime>0})()")
             if ok: return hf
         except Exception:
             pass
@@ -152,7 +152,11 @@ async def main():
                 if await bp.is_visible("#tapHint"): ok = True; break
             check("播放被手機擋住→出現「請直接點一下影片」且遮罩拿掉", ok and not await bp.is_visible("#shield"))
             await bp.evaluate("(()=>{const p=__wt.player; p.playVideo=__o[0]; p.seekTo=__o[1]; p.getCurrentTime=__o[2]; p.getPlayerState=__o[3];})()")
-            await host_play(bp)  # 觀眾自己點影片（同一個「重試到真的在播」）
+            await bp.click("#viewerWrap")  # 觀眾用手指點影片正中間
+            for _ in range(20):
+                B = await video(bp)
+                if B and not B["paused"] and B["t"] > 0: break
+                await asyncio.sleep(0.5)
             await asyncio.sleep(5)
             dd = await median_diff(h, bp)
             check(f"觀眾自己點影片後遮罩蓋回、照常同步（{dd}）", not await bp.is_visible("#tapHint") and await bp.is_visible("#shield") and dd is not None and abs(dd) < TOL_MS)
