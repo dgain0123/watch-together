@@ -27,6 +27,11 @@
   #tap { position:fixed; inset:0; z-index:10; background:rgba(0,0,0,.85); display:flex; flex-direction:column; align-items:center; justify-content:center; gap:16px; text-align:center; padding:24px; }
   #tap button { font-size:22px; padding:18px 32px; border-radius:16px; }
   .hidden { display:none !important; }
+  .shield.off { display:none; }
+  #tapHint { position:absolute; left:0; right:0; bottom:0; z-index:3; background:rgba(255,59,48,.92); color:#fff; text-align:center; padding:10px; font-size:17px; font-weight:600; pointer-events:none; }
+  #ended { position:fixed; inset:0; z-index:30; background:#000; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:12px; text-align:center; padding:24px; font-size:20px; }
+  button.danger { background:#5a1d1a; }
+  #err { color:#ff6b6b; font-size:13px; white-space:pre-wrap; }
   button.big { width:100%; font-size:20px; padding:18px; border-radius:14px; }
   .fs-btn { width:100%; margin-top:10px; background:#333; }
   #fsExit { position:absolute; top:10px; right:10px; z-index:3; padding:8px 14px; font-size:15px; background:rgba(0,0,0,.55); display:none; }
@@ -50,7 +55,6 @@
       <div class="link" id="joinLink"></div>
       <div class="row" style="justify-content:center;margin-top:10px">
         <button class="secondary" id="copy">複製連結</button>
-        <button class="secondary" id="newRoom">換一個新房間</button>
       </div>
     </div>
     <div class="card">
@@ -63,6 +67,8 @@
       <p class="status" id="hostStatus">連線中…</p>
       <button class="fs-btn" id="muteAll"></button>
       <p class="hint" id="muteAllHint"></p>
+      <button class="fs-btn danger" id="endShow">⏹ 結束放映（舊 QR code 全部失效）</button>
+      <p class="hint" id="endHint"></p>
     </div>
     <div class="card">
       <div class="player-wrap"><div id="hostPlayer"></div></div>
@@ -73,12 +79,18 @@
   <!-- 觀眾畫面 -->
   <section id="viewer" class="hidden">
     <h1>一起看 YouTube</h1>
-    <div class="player-wrap" id="viewerWrap"><div id="viewerPlayer"></div><div class="shield"></div><button id="fsExit">✕ 離開全螢幕</button></div>
+    <div class="player-wrap" id="viewerWrap"><div id="viewerPlayer"></div><div class="shield" id="shield"></div><div id="tapHint" class="hidden">👆 請直接點一下影片開始播放</div><button id="fsExit">✕ 離開全螢幕</button></div>
     <button class="fs-btn" id="fsBtn">⛶ 全螢幕觀看</button>
     <p class="status" id="viewerStatus">連線中…</p>
+    <p id="err"></p>
     <p class="hint">影片由主持人控制，會自動跟主持人同步。按「全螢幕觀看」可以滿版看。</p>
   </section>
 </main>
+
+<div id="ended" class="hidden">
+  <div>主持人已結束放映</div>
+  <div class="hint">可以關掉這個網頁了。下次放映請重新掃主持人的新 QR code。</div>
+</div>
 
 <div id="tap" class="hidden">
   <div style="font-size:18px" id="tapTitle">準備好了嗎？</div>
@@ -89,6 +101,7 @@
 <script src="https://unpkg.com/mqtt@5.10.1/dist/mqtt.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
 <script>
+window.addEventListener('error', e => { const el = document.getElementById('err'); if (el) el.textContent += '出錯了：' + e.message + '\n'; });
 (() => {
   // 兩台公開訊息伺服器同時連，一台掛了另一台還能用
   const BROKERS = ['wss://broker.emqx.io:8084/mqtt', 'wss://broker.hivemq.com:8884/mqtt'];
@@ -117,6 +130,7 @@
         clients.forEach(c => c.connected && c.publish(PREFIX + room + '/' + sub, s, { qos: 0, retain: !!retain }));
       },
       connectedCount: () => clients.filter(c => c.connected).length,
+      close: () => clients.forEach(c => c.end(true)),
     };
   }
 
@@ -165,7 +179,7 @@
       try { await navigator.clipboard.writeText(joinUrl); $('copy').textContent = '已複製'; } catch { prompt('複製這個連結', joinUrl); }
       setTimeout(() => $('copy').textContent = '複製連結', 1500);
     };
-    $('newRoom').onclick = () => { if (confirm('換新房間後，舊的 QR code 會失效，確定嗎？')) { const r = randId(6); safeSet('wt_host_room', r); location.search = '?host=' + r; } };
+
 
     const viewers = new Map(); // 觀眾 id → 最後回報時間
     let player = null, videoId = null;
@@ -191,8 +205,30 @@
     showMuteAll();
     $('muteAll').onclick = () => { muteAll = !muteAll; safeSet('wt_mute_all', muteAll ? '1' : '0'); showMuteAll(); sendState(); };
 
+    // 結束放映：通知觀眾結束並斷線，這個房間永久作廢；主持人自動換新房間（新 QR code）
+    let ended = false;
+    $('endShow').onclick = () => {
+      if (!confirm('結束放映？所有觀眾的畫面都會停掉，現在這個 QR code 會失效，下次要讓大家掃新的。')) return;
+      ended = true;
+      try { player.stopVideo(); } catch {}
+      sendState();
+      $('endHint').textContent = '結束中…';
+      setTimeout(() => {
+        const r = randId(6); safeSet('wt_host_room', r);
+        try { sessionStorage.setItem('wt_just_ended', '1'); } catch {}
+        location.replace('?host=' + r);
+      }, 1500);
+    };
+    try {
+      if (sessionStorage.getItem('wt_just_ended')) {
+        sessionStorage.removeItem('wt_just_ended');
+        $('endHint').textContent = '上一場已結束，舊的 QR code 已經失效。這是新的 QR code，下次放映請大家掃這個。';
+      }
+    } catch {}
+
     const pos = makePosEstimator(() => player);
     function sendState() {
+      if (ended) { net.publish('state', { end: true, ts: Date.now() }, true); return; }
       if (!player || !videoId || !player.getCurrentTime) return;
       const st = player.getPlayerState();
       const playing = st === YT.PlayerState.PLAYING;
@@ -261,7 +297,7 @@
         clockOffset = pongs.reduce((a, b) => (b.rtt < a.rtt ? b : a)).off;
         return;
       }
-      if (sub !== 'state' || !msg.v || msg.ts <= lastTs) return;
+      if (sub !== 'state' || (!msg.v && !msg.end) || msg.ts <= lastTs) return;
       lastTs = msg.ts;
       if (!retained) { offsets.push(msg.ts - Date.now()); if (offsets.length > 30) offsets.shift(); }
       state = msg;
@@ -274,7 +310,7 @@
 
     function refreshStatus() {
       const ok = net && net.connectedCount() > 0;
-      $('viewerStatus').innerHTML = !ok ? '連線中…' : state ? '<b>已連線</b>　跟主持人同步中' : '<b>已連線</b>　等主持人選影片…';
+      $('viewerStatus').innerHTML = state && state.end ? '主持人已結束放映' : !ok ? '連線中…' : state ? '<b>已連線</b>　跟主持人同步中' : '<b>已連線</b>　等主持人選影片…';
     }
 
     const hostNow = () => Date.now() + (clockOffset ?? (offsets.length ? Math.max(...offsets) + 50 : 0));
@@ -287,14 +323,28 @@
     let loadedId = null;
     function onState() {
       refreshStatus();
+      $('ended').classList.toggle('hidden', !(state && state.end));
+      if (state && state.end) { // 這個房間永久結束：停播、斷線，之後不會再接上
+        try { if (playerReady) player.stopVideo(); } catch {}
+        loadedId = null; setDirectTap(false); $('tap').classList.add('hidden');
+        net.close(); return;
+      }
       if (!state || !playerReady || loadedId === state.v) return;
       loadedId = state.v;
       if (unlocked) player.loadVideoById(state.v, wantTime()); else player.cueVideoById(state.v, wantTime());
     }
 
     // --- 每 0.2 秒校正一次：差很多就跳過去，差一點就微調速度追上 ---
+    window.__wt = { get player() { return player; }, get clockOffset() { return clockOffset; }, get rateWorks() { return rateWorks; }, get directTap() { return directTap; } }; // 給測試看內部狀態
     const pos = makePosEstimator(() => player);
     let busyUntil = 0, correcting = null, seekLead = 0.2, checkLead = false;
+    let askPlayAt = 0, directTap = false;
+    let rateWorks = true, rateFails = 0, lastCorr = null; // Safari 上改速度常常沒效果，沒效就改用跳轉
+    function setDirectTap(on) {
+      directTap = on;
+      $('shield').classList.toggle('off', on);
+      $('tapHint').classList.toggle('hidden', !on);
+    }
     function nearestRate(target, base) {
       const list = (player.getAvailablePlaybackRates && player.getAvailablePlaybackRates()) || [];
       let best = null;
@@ -302,8 +352,13 @@
       return best;
     }
     setInterval(() => {
-      if (!state || !playerReady || !unlocked || loadedId !== state.v) return;
+      if (!state || state.end || !playerReady || !unlocked || loadedId !== state.v) return;
       const now = Date.now(), base = state.r || 1;
+      const stNow = player.getPlayerState();
+      if (state.s === 'play' && stNow !== 1 && stNow !== 3) {
+        if (!askPlayAt) askPlayAt = now;
+        else if (now - askPlayAt > 2500 && !directTap) setDirectTap(true); // 叫了 2.5 秒還不動＝手機擋住了
+      } else askPlayAt = 0;
       if (correcting || now < busyUntil) return;
       if (player.getPlaybackRate() !== base) { player.setPlaybackRate(base); busyUntil = now + 900; return; }
       const st = player.getPlayerState();
@@ -318,18 +373,25 @@
       if (!p.good) return;
       const d = p.t - wantTime(); // 正＝我比主持人快
       if (checkLead) { seekLead = Math.min(2, Math.max(0, seekLead - d)); checkLead = false; } // 學習跳轉要提前多少
-      if (Math.abs(d) > 1) { player.seekTo(wantTime() + seekLead, true); checkLead = true; busyUntil = now + 1500; return; }
-      if (Math.abs(d) < 0.03 || clockOffset === null || state.g === false) return;
+      if (lastCorr !== null) { // 上一次微調速度有沒有效？（只看夠大的差距，小差距量不準）
+        if (Math.abs(lastCorr) > 0.08) rateFails = Math.abs(d) > Math.abs(lastCorr) * 0.7 ? rateFails + 1 : 0;
+        if (rateFails >= 3) rateWorks = false;
+        lastCorr = null;
+      }
+      const jumpAt = rateWorks ? 1 : 0.08;
+      if (Math.abs(d) > jumpAt) { player.seekTo(wantTime() + seekLead, true); checkLead = true; busyUntil = now + 1500; return; }
+      if (!rateWorks || Math.abs(d) < 0.03 || clockOffset === null || state.g === false) return;
       const r = nearestRate(base * (d > 0 ? 0.9 : 1.1), base);
       if (r === null || (d > 0) !== (r < base)) return;
       player.setPlaybackRate(r);
-      correcting = true;
+      correcting = true; lastCorr = d;
       setTimeout(() => { player.setPlaybackRate(base); correcting = false; busyUntil = Date.now() + 900; },
                  Math.min(4000, Math.abs(d) / Math.abs(r - base) * 1000));
     }, 200);
 
     // --- 聲音：由主持人決定觀眾要不要靜音 ---
     function updateSound() {
+      if (state && state.end) return;
       const hostMute = !!(state && state.m);
       const wantMute = hostMute;
       if (hostMute && !unlocked) { unlocked = true; $('tap').classList.add('hidden'); } // 靜音播放不用點，直接開始
@@ -346,8 +408,15 @@
 
     ytReady.then(() => {
       player = new YT.Player('viewerPlayer', {
-        playerVars: { ...playerVars, controls: 0, disablekb: 1 },
-        events: { onReady: () => { playerReady = true; updateSound(); onState(); } },
+        playerVars: { ...playerVars, controls: 0, disablekb: 1, mute: 1 },
+        events: {
+          onReady: () => { playerReady = true; updateSound(); onState(); },
+          onStateChange: e => {
+            if (e.data === 1 && directTap) { // 觀眾自己點影片播起來了 → 蓋回遮罩、交給同步
+              setDirectTap(false); gestured = true; unlocked = true; $('tap').classList.add('hidden'); updateSound();
+            }
+          },
+        },
       });
     });
 

@@ -21,4 +21,7 @@ host = html[html.index('<section id="host"'):html.index('</section>')]
 check("主持人網頁 QR code 在最上面", host.index('id="qr"') < host.index('id="url"') < host.index('id="hostPlayer"'))
 # 使用者裁示（2026-10-25）：不用自己貼網址，要有「一鍵貼上並播放」大按鈕
 check("有一鍵貼上並播放按鈕", 'id="pasteGo"' in html and "clipboard.readText" in html)
+# 使用者裁示（2026-10-25）：按結束放映後全部失效（觀眾斷線不再接、主持人換新 QR code）
+check("有結束放映按鈕", 'id="endShow"' in html and "net.close()" in html and "wt_just_ended" in html)
+check("錯誤會顯示在手機畫面上", 'id="err"' in html and "addEventListener('error'" in html)
 sys.exit(1 if fails else 0)

@@ -53,7 +53,7 @@ async def main():
             b = await pw.chromium.launch()  # 預設自動播放規則＝跟手機一樣，沒點過只能靜音播
             mob = {k: v for k, v in pw.devices["iPhone 13"].items() if k != "default_browser_type"}
             h = await (await b.new_context(**mob)).new_page()
-            await h.goto(U + "?host=" + room)
+            await h.goto(U + "?host=" + room, wait_until="domcontentloaded")
             await asyncio.sleep(3)
             check("主持人連上訊息伺服器", "已連線" in await h.inner_text("#hostStatus"))
             # 一鍵貼上並播放：模擬在 YouTube 按「複製連結」的分享文字
@@ -68,7 +68,7 @@ async def main():
             for skew in (3000, -1700):
                 c = await b.new_context(**mob)
                 await c.add_init_script(f"(()=>{{const D=Date.now.bind(Date);Date.now=()=>D()+({skew});}})()")
-                v = await c.new_page(); await v.goto(U + "?room=" + room); vs.append(v)
+                v = await c.new_page(); await v.goto(U + "?room=" + room, wait_until="domcontentloaded"); vs.append(v)
             for v in vs: await v.click("#tapBtn")
 
             d = await wait_stable(h, vs, 10)
@@ -91,7 +91,7 @@ async def main():
             await asyncio.sleep(2)
             Vs = [await video(v) for v in vs]
             check("全部靜音→舊觀眾都變靜音", all(x["muted"] for x in Vs))
-            nv = await (await b.new_context(**mob)).new_page(); await nv.goto(U + "?room=" + room)
+            nv = await (await b.new_context(**mob)).new_page(); await nv.goto(U + "?room=" + room, wait_until="domcontentloaded")
             await asyncio.sleep(10)
             N = await video(nv); dn = await diff_ms(h, nv)
             check(f"全部靜音時新觀眾不用點就開始播（靜音、同步 {dn}）",
@@ -102,6 +102,10 @@ async def main():
                 Vs = [await video(v) for v in vs]
                 if all(not x["muted"] for x in Vs) and await nv.is_visible("#tap"): break
             check("關掉全部靜音→點過的觀眾恢復聲音", all(not x["muted"] for x in Vs))
+            if not await nv.is_visible("#tap"):
+                print("  診斷 nv:", await nv.inner_text("#viewerStatus"), await nv.inner_text("#err"), await video(nv),
+                      await nv.evaluate("(()=>{const p=__wt.player;return {st:p.getPlayerState(),muted:p.isMuted(),dt:__wt.directTap}})()"),
+                      "ended", await nv.is_visible("#ended"), "hint", await nv.is_visible("#tapHint"))
             check("關掉全部靜音→沒點過的觀眾跳出「點一下聽聲音」", await nv.is_visible("#tap"))
             await nv.click("#tapBtn"); await asyncio.sleep(1.5)
             N = await video(nv)
@@ -117,13 +121,65 @@ async def main():
             await v.click("#fsExit"); await asyncio.sleep(0.5)
             check("離開全螢幕", "fs" not in await v.evaluate("document.body.className"))
             # 直接貼進輸入框也會自動開始（換一部影片）
-            await h.evaluate("(()=>{const el=document.getElementById('url');el.value='https://www.youtube.com/watch?v=jNQXAC9IVRw';el.dispatchEvent(new Event('paste'))})()")
+            await h.evaluate("(()=>{const el=document.getElementById('url');el.value='https://www.youtube.com/watch?v=9bZkp7q19f0';el.dispatchEvent(new Event('paste'))})()")
             ok = False
-            for _ in range(20):  # 換成 19 秒的短片，觀眾的影片長度跟著變短
+            for _ in range(20):  # 換成另一部長度 4 分多的影片，觀眾的影片長度跟著變
                 await asyncio.sleep(0.5)
                 d2 = [await f.evaluate("(()=>{const v=document.querySelector('video');return v?v.duration:0})()") for f in vs[1].frames if "youtube.com/embed" in f.url]
-                if d2 and 0 < d2[0] < 30: ok = True; break
+                if d2 and 240 < d2[0] < 260: ok = True; break
             check("貼進輸入框就自動開始，觀眾跟著換影片", ok)
+            # iPhone 擋住網頁替觀眾按播放 → 拿掉遮罩、提示觀眾直接點影片；點了之後照常同步
+            bp = await (await b.new_context(**mob)).new_page()
+            await bp.goto(U + "?room=" + room, wait_until="domcontentloaded")
+            await asyncio.sleep(4)
+            await bp.evaluate("(()=>{const p=__wt.player; window.__o=[p.playVideo,p.seekTo]; p.playVideo=()=>{}; p.seekTo=()=>{};})()")  # 模擬 iPhone：網頁叫播放、跳轉都沒反應
+            await bp.click("#tapBtn")
+            ok = False
+            for _ in range(16):
+                await asyncio.sleep(0.5)
+                if await bp.is_visible("#tapHint"): ok = True; break
+            check("播放被手機擋住→出現「請直接點一下影片」且遮罩拿掉", ok and not await bp.is_visible("#shield"))
+            await bp.evaluate("(()=>{const p=__wt.player; p.playVideo=__o[0]; p.seekTo=__o[1];})()")
+            await host_play(bp)  # 觀眾自己點影片（同一個「重試到真的在播」）
+            await asyncio.sleep(8)
+            dd = await diff_ms(h, bp)
+            check(f"觀眾自己點影片後遮罩蓋回、照常同步（{dd}）", not await bp.is_visible("#tapHint") and await bp.is_visible("#shield") and dd is not None and abs(dd) < TOL_MS)
+
+            # Safari 核心的觀眾（改速度沒效果的那種）也要對得上
+            wb = await pw.webkit.launch()
+            wv = await (await wb.new_context(**mob)).new_page()
+            await wv.goto(U + "?room=" + room, wait_until="domcontentloaded"); await asyncio.sleep(4)
+            await wv.tap("#tapBtn")
+            await asyncio.sleep(16)
+            dw = await diff_ms(h, wv)
+            if dw is None or abs(dw) >= TOL_MS:
+                print("  Safari 觀眾診斷:", await video(wv), await video(h), await wv.inner_text("#viewerStatus"), await wv.inner_text("#err"),
+                      await wv.evaluate("(()=>{const p=__wt.player;return p&&p.getPlayerState?{st:p.getPlayerState(),ct:p.getCurrentTime(),rw:__wt.rateWorks,dt:__wt.directTap}:null})()"), "tap可見", await wv.is_visible("#tap"))
+            check(f"Safari 核心的觀眾也同步（{dw}）", dw is not None and abs(dw) < TOL_MS)
+
+            # 結束放映＝全部失效：觀眾停止並斷線、舊 QR code 作廢、主持人換新 QR code
+            h.on("dialog", lambda dlg: asyncio.ensure_future(dlg.accept()))
+            await h.click("#endShow")
+            ok = False
+            for _ in range(12):
+                await asyncio.sleep(0.5)
+                if all([await v.is_visible("#ended") for v in vs + [wv]]): ok = True; break
+            Vs = [await video(v) for v in vs]
+            check("結束放映→觀眾都顯示「主持人已結束放映」且停止", ok and all(x is None or x["paused"] or x["t"] == 0 for x in Vs))
+            await asyncio.sleep(2)
+            new_room = h.url.split("host=")[1]
+            check(f"主持人自動換成新房間（{room}→{new_room}）且有提示", new_room != room and "失效" in await h.inner_text("#endHint"))
+            late = await (await b.new_context(**mob)).new_page()
+            await late.goto(U + "?room=" + room, wait_until="domcontentloaded"); await asyncio.sleep(4)
+            check("結束後才掃舊 QR code 的人只看到已結束", await late.is_visible("#ended"))
+            # 主持人在新房間再播放：舊觀眾不會接上
+            await asyncio.sleep(2)
+            await h.evaluate("(()=>{const el=document.getElementById('url');el.value='https://youtu.be/dQw4w9WgXcQ';el.dispatchEvent(new Event('paste'))})()")
+            await host_play(h)
+            await asyncio.sleep(5)
+            Vs = [await video(v) for v in vs]
+            check("新房間播放時舊觀眾仍是結束、不會跟著播", all([await v.is_visible("#ended") for v in vs]) and all(x is None or x["paused"] or x["t"] < 1 for x in Vs))
+            await wb.close()
             await b.close()
     finally:
         srv.kill()
