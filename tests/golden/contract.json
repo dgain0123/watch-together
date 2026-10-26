@@ -11,7 +11,10 @@
       "hostStatus",
       "endShow",
       "endHint",
-      "hostPlayer"
+      "hostWrap",
+      "hostPlayer",
+      "hostFsExit",
+      "hostFsBtn"
     ],
     "觀眾頁面（依序）": [
       "viewer",
@@ -45,6 +48,7 @@
   },
   "播放器設定": {
     "共用": "{ playsinline: 1, rel: 0, modestbranding: 1 }",
+    "主持人": "Object.assign({}, playerVars, { fs: 0 })",
     "觀眾": "Object.assign({}, playerVars, { controls: 1, disablekb: 1, mute: 1 })"
   },
   "同步參數": {

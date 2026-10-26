@@ -18,6 +18,9 @@ check("觀眾播放器一律靜音載入且持續保持靜音", "mute: 1 }" in h
 # 兩台訊息伺服器同時連，一台掛了還能用
 check("同時連兩台訊息伺服器", html.count("wss://") >= 2)
 check("觀眾有全螢幕按鈕", 'id="fsBtn"' in html and 'id="fsExit"' in html)
+# 使用者要求（2026-10-26）：主持人 iPhone 全螢幕再縮回來不能暫停。iPhone 退出 YouTube 自己的全螢幕會被系統暫停，
+# 所以主持人藏起 YouTube 全螢幕鍵（fs: 0），改用網頁鋪滿畫面的全螢幕鈕（影片不離開網頁就不會停）
+check("主持人有網頁全螢幕鈕、藏起 YouTube 全螢幕鍵", 'id="hostFsBtn"' in html and 'id="hostFsExit"' in html and "playerVars, { fs: 0 })" in html)
 # 使用者裁示（2026-10-25）：主持人網頁的 QR code 放在最上面（標題下第一塊）
 host = html[html.index('<section id="host"'):html.index('</section>')]
 check("主持人網頁 QR code 在最上面", host.index('id="qr"') < host.index('id="url"') < host.index('id="hostPlayer"'))

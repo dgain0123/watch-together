@@ -110,6 +110,16 @@ async def main():
             check(f"全螢幕鋪滿畫面 {r} vs {vp}", abs(r[0] - vp["width"]) < 2 and abs(r[1] - vp["height"]) < 2)
             await v.click("#fsExit"); await asyncio.sleep(0.5)
             check("離開全螢幕", "fs" not in await v.evaluate("document.body.className"))
+            # 主持人（iPhone 尺寸）全螢幕再縮回來：影片不能停（2026-10-26 使用者要求）
+            await h.evaluate("delete Element.prototype.requestFullscreen")
+            await h.click("#hostFsBtn"); await asyncio.sleep(0.8)
+            r = await h.evaluate("(()=>{const r=document.getElementById('hostWrap').getBoundingClientRect();return [r.width,r.height]})()")
+            hvp = h.viewport_size
+            check(f"主持人全螢幕鋪滿畫面 {r} vs {hvp}", abs(r[0] - hvp["width"]) < 2 and abs(r[1] - hvp["height"]) < 2)
+            await h.click("#hostFsExit"); await asyncio.sleep(1)
+            H1 = await video(h); await asyncio.sleep(1); H2 = await video(h)
+            check("主持人離開全螢幕：影片繼續播沒有暫停", "fs" not in await h.evaluate("document.body.className")
+                  and H1 and H2 and not H2["paused"] and H2["t"] > H1["t"] + 0.5)
             # 直接貼進輸入框也會自動開始（換一部影片）
             await h.evaluate("(()=>{const el=document.getElementById('url');el.value='https://www.youtube.com/watch?v=9bZkp7q19f0';el.dispatchEvent(new Event('paste'))})()")
             ok = False

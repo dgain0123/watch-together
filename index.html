@@ -42,13 +42,13 @@
   #err { color:#ff6b6b; font-size:13px; white-space:pre-wrap; }
   button.big { width:100%; font-size:20px; padding:18px; border-radius:14px; }
   .fs-btn { width:100%; margin-top:10px; background:#333; }
-  #fsExit { position:absolute; top:10px; right:10px; z-index:3; padding:8px 14px; font-size:15px; background:rgba(0,0,0,.55); display:none; }
+  .fs-exit { position:absolute; top:10px; right:10px; z-index:3; padding:8px 14px; font-size:15px; background:rgba(0,0,0,.55); display:none; }
   /* 全螢幕：鋪滿畫面；直拿手機時把影片轉 90 度 */
   body.fs { overflow:hidden; }
-  body.fs #viewerWrap { position:fixed; z-index:20; border-radius:0; padding-top:0; top:0; left:0; width:100vw; height:100vh; height:100dvh; }
-  body.fs #fsExit { display:block; }
+  body.fs .fs-wrap.on { position:fixed; z-index:20; border-radius:0; padding-top:0; top:0; left:0; width:100vw; height:100vh; height:100dvh; }
+  body.fs .fs-wrap.on .fs-exit { display:block; }
   @media (orientation: portrait) {
-    body.fs #viewerWrap { width:100vh; width:100dvh; height:100vw; top:50%; left:50%; transform:translate(-50%,-50%) rotate(90deg); }
+    body.fs .fs-wrap.on { width:100vh; width:100dvh; height:100vw; top:50%; left:50%; transform:translate(-50%,-50%) rotate(90deg); }
   }
 </style>
 </head>
@@ -79,15 +79,16 @@
       <p class="hint" id="endHint"></p>
     </div>
     <div class="card">
-      <div class="player-wrap"><div id="hostPlayer"></div></div>
-      <p class="hint">直接在影片上按播放、暫停、拖進度條，大家的手機都會跟著動。</p>
+      <div class="player-wrap fs-wrap" id="hostWrap"><div id="hostPlayer"></div><button class="fs-exit" id="hostFsExit">✕ 離開全螢幕</button></div>
+      <button class="fs-btn" id="hostFsBtn">⛶ 全螢幕</button>
+      <p class="hint">直接在影片上按播放、暫停、拖進度條，大家的手機都會跟著動。要全螢幕請按上面的「⛶ 全螢幕」（不會暫停）。</p>
     </div>
   </section>
 
   <!-- 觀眾畫面 -->
   <section id="viewer" class="hidden">
     <h1>一起看 YouTube</h1>
-    <div class="player-wrap" id="viewerWrap"><div id="viewerPlayer"></div><div class="shield" id="shield"></div><button id="fsExit">✕ 離開全螢幕</button></div>
+    <div class="player-wrap fs-wrap" id="viewerWrap"><div id="viewerPlayer"></div><div class="shield" id="shield"></div><button class="fs-exit" id="fsExit">✕ 離開全螢幕</button></div>
     <div id="tapHint" class="hidden">👆 影片沒有自動開始<br>請用手指點一下上面影片的正中間</div>
     <button class="fs-btn" id="fsBtn">⛶ 全螢幕觀看</button>
     <p class="status" id="viewerStatus">連線中…</p>
@@ -148,6 +149,30 @@ window.addEventListener('error', e => { const el = document.getElementById('err'
   const ytReady = new Promise(res => { window.onYouTubeIframeAPIReady = res; });
   const tag = document.createElement('script'); tag.src = 'https://www.youtube.com/iframe_api'; document.head.appendChild(tag);
   const playerVars = { playsinline: 1, rel: 0, modestbranding: 1 };
+
+  // ---------- 全螢幕（主持人、觀眾共用） ----------
+  // 不用 YouTube 自己的全螢幕：iPhone 退出 YouTube 全螢幕時系統會把影片暫停。
+  // 改成網頁鋪滿畫面（影片一直留在網頁裡，進出都不會停）；Android 再加真全螢幕＋鎖橫向，iPhone 直拿轉 90 度
+  function setupFullscreen(wrap, btn, exitBtn) {
+    const root = document.documentElement;
+    const isFs = () => document.fullscreenElement || document.webkitFullscreenElement;
+    btn.onclick = async () => {
+      wrap.classList.add('on'); document.body.classList.add('fs');
+      try {
+        if (root.requestFullscreen) await root.requestFullscreen({ navigationUI: 'hide' });
+        else if (root.webkitRequestFullscreen) root.webkitRequestFullscreen();
+        if (screen.orientation && screen.orientation.lock) await screen.orientation.lock('landscape');
+      } catch (e) {}
+    };
+    const leave = () => { document.body.classList.remove('fs'); wrap.classList.remove('on'); };
+    exitBtn.onclick = () => {
+      leave();
+      try { if (isFs()) (document.exitFullscreen || document.webkitExitFullscreen).call(document); } catch (e) {}
+    };
+    const onFsChange = () => { if (!isFs()) leave(); };
+    document.addEventListener('fullscreenchange', onFsChange);
+    document.addEventListener('webkitfullscreenchange', onFsChange);
+  }
 
   // ---------- 準確的播放位置 ----------
   // YouTube 回報的時間每隔一小段才更新一次（會落後）。連續取樣，取「最不落後」的那筆推算現在的位置。
@@ -237,9 +262,11 @@ window.addEventListener('error', e => { const el = document.getElementById('err'
     }
     setInterval(sendState, 500);
 
+    setupFullscreen($('hostWrap'), $('hostFsBtn'), $('hostFsExit'));
+
     ytReady.then(() => {
       player = new YT.Player('hostPlayer', {
-        playerVars,
+        playerVars: Object.assign({}, playerVars, { fs: 0 }), // 藏起 YouTube 自己的全螢幕鍵（iPhone 退出時會暫停），用網頁的全螢幕鈕
         events: {
           onReady: () => {
             const last = safeGet('wt_host_video');
@@ -449,24 +476,7 @@ window.addEventListener('error', e => { const el = document.getElementById('err'
       });
     });
 
-    // 全螢幕：Android 用真的全螢幕＋鎖橫向；iPhone 不支援，就用畫面鋪滿＋旋轉
-    const root = document.documentElement;
-    const isFs = () => document.fullscreenElement || document.webkitFullscreenElement;
-    $('fsBtn').onclick = async () => {
-      document.body.classList.add('fs');
-      try {
-        if (root.requestFullscreen) await root.requestFullscreen({ navigationUI: 'hide' });
-        else if (root.webkitRequestFullscreen) root.webkitRequestFullscreen();
-        if (screen.orientation && screen.orientation.lock) await screen.orientation.lock('landscape');
-      } catch (e) {}
-    };
-    $('fsExit').onclick = () => {
-      document.body.classList.remove('fs');
-      try { if (isFs()) (document.exitFullscreen || document.webkitExitFullscreen).call(document); } catch (e) {}
-    };
-    const onFsChange = () => { if (!isFs()) document.body.classList.remove('fs'); };
-    document.addEventListener('fullscreenchange', onFsChange);
-    document.addEventListener('webkitfullscreenchange', onFsChange);
+    setupFullscreen($('viewerWrap'), $('fsBtn'), $('fsExit'));
 
   }
 

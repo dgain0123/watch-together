@@ -48,7 +48,8 @@ def extract():
         },
         "播放器設定": {
             "共用": one(r"const playerVars = (\{[^}]+\})"),
-            "觀眾": one(r"playerVars: (Object\.assign\(\{\}, playerVars, \{[^}]+\}\))"),
+            "主持人": one(r"new YT\.Player\('hostPlayer', \{\s*playerVars: ([^\n]+?\))[,\s]*//"),
+            "觀眾": one(r"new YT\.Player\('viewerPlayer', \{\s*playerVars: (Object\.assign\(\{\}, playerVars, \{[^}]+\}\))"),
         },
         "同步參數": {
             "訊息伺服器": re.findall(r"'(wss://[^']+)'", script),
