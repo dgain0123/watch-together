@@ -51,6 +51,20 @@
     "主持人": "Object.assign({}, playerVars, { fs: 0 })",
     "觀眾": "Object.assign({}, playerVars, { controls: 1, disablekb: 1, mute: 1 })"
   },
+  "全螢幕": {
+    "主持人按鈕": "⛶ 全螢幕",
+    "觀眾按鈕": "⛶ 全螢幕觀看",
+    "離開按鈕": [
+      "✕ 離開全螢幕"
+    ],
+    "主持人與觀眾共用同一套": [
+      "hostWrap",
+      "viewerWrap"
+    ],
+    "iPhone 直拿轉 90 度": true,
+    "Android 鎖橫向": true,
+    "主持人藏起 YouTube 全螢幕鍵": true
+  },
   "同步參數": {
     "訊息伺服器": [
       "wss://broker.emqx.io:8084/mqtt",

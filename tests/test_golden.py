@@ -51,6 +51,15 @@ def extract():
             "主持人": one(r"new YT\.Player\('hostPlayer', \{\s*playerVars: ([^\n]+?\))[,\s]*//"),
             "觀眾": one(r"new YT\.Player\('viewerPlayer', \{\s*playerVars: (Object\.assign\(\{\}, playerVars, \{[^}]+\}\))"),
         },
+        "全螢幕": {
+            "主持人按鈕": one(r'id="hostFsBtn">([^<]+)<'),
+            "觀眾按鈕": one(r'id="fsBtn">([^<]+)<'),
+            "離開按鈕": sorted(set(re.findall(r'class="fs-exit" id="[^"]+">([^<]+)<', html))),
+            "主持人與觀眾共用同一套": re.findall(r"setupFullscreen\(\$\('(\w+)'\)", script),
+            "iPhone 直拿轉 90 度": "rotate(90deg)" in html,
+            "Android 鎖橫向": "screen.orientation.lock('landscape')" in script,
+            "主持人藏起 YouTube 全螢幕鍵": "playerVars, { fs: 0 })" in script,
+        },
         "同步參數": {
             "訊息伺服器": re.findall(r"'(wss://[^']+)'", script),
             "主題前綴": one(r"const PREFIX = '([^']+)'"),
