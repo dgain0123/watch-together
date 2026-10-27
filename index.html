@@ -67,10 +67,10 @@
       </div>
     </div>
     <div class="card">
-      <button id="pasteGo" class="big">📋 貼上並播放</button>
-      <p class="hint" style="margin:8px 0 12px">在 YouTube 按「分享」→「複製連結」，回來按上面的按鈕就開始。iPhone 會跳出「貼上」小泡泡，點它一下。</p>
+      <button id="pasteUrl" class="big">📋 換成已複製的網址</button>
+      <p class="hint" style="margin:8px 0 12px">在 YouTube 按「分享」→「複製連結」，回來按上面的按鈕：舊網址會清掉、換成剛複製的，再按「播放」開始。iPhone 會跳出「貼上」小泡泡，點它一下。</p>
       <div class="row">
-        <input id="url" placeholder="或把連結貼在這裡" autocomplete="off">
+        <input id="url" placeholder="或把連結貼在這裡，再按播放" autocomplete="off">
         <button id="go">播放</button>
       </div>
       <p class="status" id="hostStatus">連線中…</p>
@@ -287,17 +287,16 @@ window.addEventListener('error', e => { const el = document.getElementById('err'
       sendState();
     }
     $('go').onclick = go;
-    // 一鍵：讀剪貼簿 → 播放
-    $('pasteGo').onclick = async () => {
+    // 一鍵：清掉舊網址 → 換成剪貼簿的網址（不自動播放，播放由主持人自己按；2026-10-27 使用者裁示）
+    $('pasteUrl').onclick = async () => {
+      $('url').value = '';
       let text = '';
       try { text = await navigator.clipboard.readText(); } catch (e) {}
       if (!text) { $('url').focus(); alert('讀不到剪貼簿，請長按輸入框選「貼上」'); return; }
       if (!parseVideoId(text)) { alert('剪貼簿裡不是 YouTube 連結。請在 YouTube 按「分享」→「複製連結」再回來按'); return; }
       $('url').value = text.trim();
-      go();
     };
-    // 直接貼進輸入框也自動開始
-    $('url').addEventListener('paste', () => setTimeout(() => { if (parseVideoId($('url').value)) go(); }, 0));
+    // 貼進輸入框不自動開始：貼上跟播放分開（2026-10-27 使用者裁示）
     $('url').addEventListener('keydown', e => { if (e.key === 'Enter') go(); });
   }
 

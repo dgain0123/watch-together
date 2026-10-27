@@ -24,8 +24,12 @@ check("主持人有網頁全螢幕鈕、藏起 YouTube 全螢幕鍵", 'id="hostF
 # 使用者裁示（2026-10-25）：主持人網頁的 QR code 放在最上面（標題下第一塊）
 host = html[html.index('<section id="host"'):html.index('</section>')]
 check("主持人網頁 QR code 在最上面", host.index('id="qr"') < host.index('id="url"') < host.index('id="hostPlayer"'))
-# 使用者裁示（2026-10-25）：不用自己貼網址，要有「一鍵貼上並播放」大按鈕
-check("有一鍵貼上並播放按鈕", 'id="pasteGo"' in html and "clipboard.readText" in html)
+# 使用者裁示（2026-10-27）：一鍵「清掉舊網址＋貼上已複製的網址」，播放自己按（取代 10/25 的貼上並播放）
+check("有一鍵換成已複製網址按鈕", 'id="pasteUrl"' in html and "clipboard.readText" in html and 'id="pasteGo"' not in html)
+_h = html[html.index("$('pasteUrl').onclick"):html.index("// 貼進輸入框不自動開始")]
+check("換網址按鈕先清空輸入框", "$('url').value = ''" in _h)
+check("貼進輸入框不自動播放", "addEventListener('paste'" not in html)
+check("換網址按鈕不自動播放", "go()" not in _h and "loadVideoById" not in _h)
 # 使用者裁示（2026-10-25）：按結束放映後全部失效（觀眾斷線不再接、主持人換新 QR code）
 check("有結束放映按鈕", 'id="endShow"' in html and "net.close()" in html and "wt_just_ended" in html)
 check("錯誤會顯示在手機畫面上", 'id="err"' in html and "addEventListener('error'" in html)

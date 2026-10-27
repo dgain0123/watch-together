@@ -72,12 +72,15 @@ async def main():
                 if "已連線" in await h.inner_text("#hostStatus"): break
                 await asyncio.sleep(0.5)
             check("主持人連上訊息伺服器", "已連線" in await h.inner_text("#hostStatus"))
-            # 一鍵貼上並播放：模擬在 YouTube 按「複製連結」的分享文字
+            # 一鍵換成已複製的網址：模擬在 YouTube 按「複製連結」的分享文字；輸入框原本有舊網址
             await h.context.grant_permissions(["clipboard-read", "clipboard-write"], origin=U.rstrip("/"))
+            await h.fill("#url", "https://youtu.be/OLDOLDOLD01")
             await h.evaluate(f"navigator.clipboard.writeText('https://youtu.be/{VID}?si=abc123')")
-            await h.click("#pasteGo")
+            await h.click("#pasteUrl")
             await asyncio.sleep(1)
-            check("一鍵貼上並播放：讀到剪貼簿的連結", VID in await h.input_value("#url"))
+            check("一鍵換網址：舊網址清掉、換成剪貼簿的連結", await h.input_value("#url") == f"https://youtu.be/{VID}?si=abc123")
+            check("一鍵換網址：不會自己開始播", await h.evaluate("localStorage.getItem('wt_host_video')") != VID)
+            await h.click("#go")
             hf = await host_play(h)
 
             vs = []
@@ -120,14 +123,17 @@ async def main():
             H1 = await video(h); await asyncio.sleep(1); H2 = await video(h)
             check("主持人離開全螢幕：影片繼續播沒有暫停", "fs" not in await h.evaluate("document.body.className")
                   and H1 and H2 and not H2["paused"] and H2["t"] > H1["t"] + 0.5)
-            # 直接貼進輸入框也會自動開始（換一部影片）
+            # 貼進輸入框不會自動開始（貼上跟播放分開），按「播放」才換（換一部影片）
             await h.evaluate("(()=>{const el=document.getElementById('url');el.value='https://www.youtube.com/watch?v=9bZkp7q19f0';el.dispatchEvent(new Event('paste'))})()")
+            await asyncio.sleep(2)
+            check("貼進輸入框不自動換影片", await h.evaluate("localStorage.getItem('wt_host_video')") == VID)
+            await h.click("#go")
             ok = False
             for _ in range(20):  # 換成另一部長度 4 分多的影片，觀眾的影片長度跟著變
                 await asyncio.sleep(0.5)
                 d2 = [await f.evaluate("(()=>{const v=document.querySelector('video');return v?v.duration:0})()") for f in vs[1].frames if "youtube.com/embed" in f.url]
                 if d2 and 240 < d2[0] < 260: ok = True; break
-            check("貼進輸入框就自動開始，觀眾跟著換影片", ok)
+            check("按播放才換影片，觀眾跟著換", ok)
             # iPhone 擋住網頁替觀眾按播放 → 拿掉遮罩、提示觀眾直接點影片；點了之後照常同步
             bp = await (await b.new_context(**andr)).new_page()
             await bp.goto(U + "?room=" + room, wait_until="domcontentloaded")
@@ -195,6 +201,7 @@ async def main():
             # 主持人在新房間再播放：舊觀眾不會接上
             await asyncio.sleep(2)
             await h.evaluate("(()=>{const el=document.getElementById('url');el.value='https://youtu.be/dQw4w9WgXcQ';el.dispatchEvent(new Event('paste'))})()")
+            await h.click("#go")  # 貼上跟播放分開：要按播放
             await host_play(h)
             await asyncio.sleep(5)
             Vs = [await video(v) for v in vs]
