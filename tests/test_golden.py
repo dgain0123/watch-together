@@ -51,6 +51,14 @@ def extract():
             "主持人": one(r"new YT\.Player\('hostPlayer', \{\s*playerVars: ([^\n]+?\))[,\s]*//"),
             "觀眾": one(r"new YT\.Player\('viewerPlayer', \{\s*playerVars: (Object\.assign\(\{\}, playerVars, \{[^}]+\}\))"),
         },
+        "選影片": {
+            "換網址按鈕": one(r'id="pasteUrl"[^>]*>([^<]+)<'),
+            "輸入框提示": one(r'id="url" placeholder="([^"]+)"'),
+            "換網址先清空輸入框": "$('url').value = '';" in section("$('pasteUrl').onclick", "};"),
+            "換網址不自動播放（貼上跟播放分開）": "go()" not in section("$('pasteUrl').onclick", "};"),
+            "貼進輸入框不自動播放": "addEventListener('paste'" not in script,
+            "播放按鈕": one(r'id="go">([^<]+)<'),
+        },
         "全螢幕": {
             "主持人按鈕": one(r'id="hostFsBtn">([^<]+)<'),
             "觀眾按鈕": one(r'id="fsBtn">([^<]+)<'),
