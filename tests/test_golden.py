@@ -74,6 +74,8 @@ def extract():
             "主持人送狀態間隔ms": one(r"setInterval\(sendState, (\d+)\)"),
             "位置取樣間隔ms": one(r"samples\.shift\(\);\s*\}, (\d+)\);"),
             "跳轉門檻": one(r"const jumpAt = ([^;]+);"),
+            "跳轉放寬記幾毫秒": one(r"seekTimes = seekTimes\.filter\(x => now - x < (\d+)\)"),
+            "連續幾次超過門檻才跳": one(r"if \(wantJump >= (\d+)"),
             "微調沒效幾次改跳轉": one(r"if \(rateFails >= (\d+)\) rateWorks = false"),
             "iPhone/Safari 一開始只用跳轉": one(r"let (rateWorks = !isSafariLike)"),
             "Safari 判斷": one(r"const isSafariLike = ([^;]+);"),

@@ -181,6 +181,16 @@ async def main():
             # Safari 只能用跳轉校正（差 0.08 秒以上才跳，太常跳畫面會頓），所以標準放 0.1 秒
             check(f"Safari 核心的觀眾也同步 < 100ms（{dw}）", dw is not None and abs(dw) < 100)
 
+            # 慢的 iPhone：每次跳轉落點都不準（重新讀取花的時間不固定）→ 不能一直跳（一直跳＝畫面一直出現紅色讀取條、一頓一頓，10/27 放映回報）
+            await wv.evaluate("""(()=>{const p=__wt.player; window.__os=p.seekTo.bind(p);
+              p.seekTo=(t,a)=>window.__os(t+(Math.random()*0.6-0.3),a);
+              window.__os(p.getCurrentTime()+1.5,true);})()""")  # 先推離 1.5 秒，讓它開始跳
+            await asyncio.sleep(12)  # 先讓它跳回來、穩下來
+            s0 = await wv.evaluate("__wt.seekCount"); await asyncio.sleep(20)
+            n = await wv.evaluate("__wt.seekCount") - s0
+            check(f"慢 iPhone 跳轉落點不準時不會一直跳（穩下來後 20 秒跳 {n} 次，要 ≤ 2）", n <= 2)
+            await wv.evaluate("(()=>{__wt.player.seekTo=window.__os;})()")
+
             # 結束放映＝全部失效：觀眾停止並斷線、舊 QR code 作廢、主持人換新 QR code
             await h.click("#endShow")
             ok = False

@@ -361,7 +361,7 @@ window.addEventListener('error', e => { const el = document.getElementById('err'
     }
 
     // --- 每 0.2 秒校正一次：差很多就跳過去，差一點就微調速度追上 ---
-    window.__wt = { get player() { return player; }, get clockOffset() { return clockOffset; }, get rateWorks() { return rateWorks; }, get directTap() { return directTap; }, get seekLead() { return seekLead; }, log: [] }; // 給測試看內部狀態
+    window.__wt = { get player() { return player; }, get clockOffset() { return clockOffset; }, get rateWorks() { return rateWorks; }, get directTap() { return directTap; }, get seekLead() { return seekLead; }, get seekCount() { return seekCount; }, log: [] }; // 給測試看內部狀態
     const pos = makePosEstimator(() => player);
     let busyUntil = 0, correcting = null, seekLead = 0.2, checkLead = false;
     let directTap = false, lastCt = -1, stuckSince = 0, seekCount = 0;
@@ -390,6 +390,7 @@ window.addEventListener('error', e => { const el = document.getElementById('err'
     }, 500);
     // iPhone／Safari 改播放速度的反應不可預測（沒效或反效果），一開始就只用跳轉校正；其他瀏覽器微調沒效也會自動改用跳轉
     let rateWorks = !isSafariLike, rateFails = 0, lastCorr = null;
+    let seekTimes = [], wantJump = 0, lastJumpAt = null; // 最近的跳轉時刻、連續幾次超過門檻、目前門檻（回報用）
     function setDirectTap(on) {
       directTap = on;
       // iOS：網頁替觀眾開聲音時會把影片暫停，要觀眾自己點影片才能有聲音播放
@@ -429,8 +430,18 @@ window.addEventListener('error', e => { const el = document.getElementById('err'
         if (rateFails >= 2) rateWorks = false;
         lastCorr = null;
       }
-      const jumpAt = rateWorks ? 0.3 : 0.05; // 差很多直接跳；小差距才微調速度
-      if (Math.abs(d) > jumpAt) { player.seekTo(wantTime() + seekLead, true); checkLead = true; busyUntil = now + 1500; seekCount++; return; }
+      // 差很多直接跳；小差距才微調速度。
+      // 慢的 iPhone 每跳一次都要重新讀取（畫面底下出現紅色讀取條、頓一下），讀完又落後再跳＝一直在讀（10/27 實際放映回報）
+      // → 最近 30 秒跳越多次門檻放越寬（每多跳一次加倍，最多 0.5 秒）；而且差距要連續 3 次都超過才跳（單次量測有雜訊）
+      seekTimes = seekTimes.filter(x => now - x < 30000);
+      const jumpAt = Math.min(0.5, (rateWorks ? 0.3 : 0.05) * Math.pow(2, Math.max(0, seekTimes.length - 1)));
+      wantJump = Math.abs(d) > jumpAt ? wantJump + 1 : 0;
+      lastJumpAt = jumpAt;
+      if (wantJump >= 3 || Math.abs(d) > 1) {
+        player.seekTo(wantTime() + seekLead, true); checkLead = true; busyUntil = now + 1500; seekCount++;
+        seekTimes.push(now); wantJump = 0; return;
+      }
+      if (Math.abs(d) > jumpAt) return; // 還在確認是不是真的差這麼多，先別微調速度
       if (!rateWorks || Math.abs(d) < 0.03 || clockOffset === null || state.g === false) return;
       const r = nearestRate(base * (d > 0 ? 0.9 : 1.1), base);
       if (r === null || (d > 0) !== (r < base)) return;
@@ -454,7 +465,7 @@ window.addEventListener('error', e => { const el = document.getElementById('err'
         playerReady, directTap, st, ct, muted, loadedId,
         state: state && { s: state.s, t: state.t, v: state.v, end: state.end },
         shieldOff: $('shield').classList.contains('off'),
-        trail: trail.slice(), events: stateEvents.slice(), conns: net.connectedCount(), seeks: seekCount, rateWorks: rateWorks,
+        trail: trail.slice(), events: stateEvents.slice(), conns: net.connectedCount(), seeks: seekCount, rateWorks: rateWorks, jumpAt: lastJumpAt,
         errs: window.__errs, yt: typeof YT, iframe: !!document.querySelector('#viewerWrap iframe'),
         lowPower: null,
       });
