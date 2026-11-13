@@ -14,9 +14,7 @@
       "hostWrap",
       "hostPlayer",
       "hostFsExit",
-      "hostFsBtn",
-      "awayHint",
-      "awayPause"
+      "hostFsBtn"
     ],
     "觀眾頁面（依序）": [
       "viewer",
