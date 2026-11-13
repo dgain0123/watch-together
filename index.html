@@ -81,7 +81,7 @@
     <div class="card">
       <div class="player-wrap fs-wrap" id="hostWrap"><div id="hostPlayer"></div><button class="fs-exit" id="hostFsExit">✕ 離開全螢幕</button></div>
       <button class="fs-btn" id="hostFsBtn">⛶ 全螢幕</button>
-      <p class="hint">直接在影片上按播放、暫停、拖進度條，大家的手機都會跟著動。切去別的 App 時大家會一起暫停，回來再一起播。要全螢幕請按上面的「⛶ 全螢幕」（不會暫停）。</p>
+      <p class="hint">直接在影片上按播放、暫停、拖進度條，大家的手機都會跟著動。切去別的 App 時大家會一起暫停，回來按播放再一起播。要全螢幕請按上面的「⛶ 全螢幕」（不會暫停）。</p>
     </div>
   </section>
 
@@ -262,21 +262,16 @@ window.addEventListener('error', e => { const el = document.getElementById('err'
     }
     setInterval(sendState, 500);
 
-    // 主持人切去別的 App：大家一起暫停，回來再一起播（2026-11-13 使用者裁示）。
+    // 主持人切去別的 App：大家一起暫停；回來不自動播，主持人自己按播放（2026-11-13 使用者裁示）。
     // iPhone 背景一定會停掉主持人的影片和聲音，觀眾又是靜音，照常播＝大家沒聲音。
     // 一離開就自己暫停＋馬上廣播，不靠手機暫停後的通知（手機可能先凍結網頁、來不及送）。
-    let pausedByAway = false;
     function goAway() {
       if (ended || !player || !videoId || !player.getPlayerState || player.getPlayerState() !== 1) return;
       const t = pos().t;
       try { player.pauseVideo(); } catch (e) {}
-      pausedByAway = true;
       net.publish('state', { v: videoId, s: 'pause', t: t, g: true, r: player.getPlaybackRate(), ts: Date.now() }, true);
     }
-    document.addEventListener('visibilitychange', () => {
-      if (document.hidden) { goAway(); return; }
-      if (pausedByAway) { pausedByAway = false; try { player.playVideo(); } catch (e) {} } // iPhone 不准網頁替你按播放時，自己點 ▶
-    });
+    document.addEventListener('visibilitychange', () => { if (document.hidden) goAway(); });
     window.addEventListener('pagehide', goAway);
 
     setupFullscreen($('hostWrap'), $('hostFsBtn'), $('hostFsExit'));

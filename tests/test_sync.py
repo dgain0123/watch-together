@@ -123,7 +123,7 @@ async def main():
             H1 = await video(h); await asyncio.sleep(1); H2 = await video(h)
             check("主持人離開全螢幕：影片繼續播沒有暫停", "fs" not in await h.evaluate("document.body.className")
                   and H1 and H2 and not H2["paused"] and H2["t"] > H1["t"] + 0.5)
-            # 主持人切去別的 App（2026-11-13 使用者裁示）：大家一起暫停，回來再一起播
+            # 主持人切去別的 App（2026-11-13 使用者裁示）：大家一起暫停；回來不自動播，主持人按播放才一起播
             await h.evaluate("""(()=>{Object.defineProperty(document,'hidden',{configurable:true,get:()=>true});
               Object.defineProperty(document,'visibilityState',{configurable:true,get:()=>'hidden'});
               document.dispatchEvent(new Event('visibilitychange'));})()""")
@@ -134,9 +134,11 @@ async def main():
             await h.evaluate("""(()=>{Object.defineProperty(document,'hidden',{configurable:true,get:()=>false});
               Object.defineProperty(document,'visibilityState',{configurable:true,get:()=>'visible'});
               document.dispatchEvent(new Event('visibilitychange'));})()""")
-            hf = await host_play(h)  # 電腦會自動恢復播放；iPhone 不准的話主持人自己點 ▶，效果一樣
+            await asyncio.sleep(3)
+            check("主持人回來→不自動播，主持人和觀眾都還停著", (await video(h))["paused"] and all(x and x["paused"] for x in [await video(v) for v in vs]))
+            hf = await host_play(h)  # 主持人自己按播放
             d = await wait_stable(h, vs, 9)
-            check(f"主持人回來→大家一起繼續播、照常同步：{d}", all(x is not None and abs(x) < TOL_MS for x in d))
+            check(f"主持人按播放→大家一起播、照常同步：{d}", all(x is not None and abs(x) < TOL_MS for x in d))
             # 貼進輸入框不會自動開始（貼上跟播放分開），按「播放」才換（換一部影片）
             await h.evaluate("(()=>{const el=document.getElementById('url');el.value='https://www.youtube.com/watch?v=9bZkp7q19f0';el.dispatchEvent(new Event('paste'))})()")
             await asyncio.sleep(2)
