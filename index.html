@@ -37,6 +37,8 @@
   .hidden { display:none !important; }
   .shield.off { display:none; }
   #tapHint { margin-top:10px; background:#ff3b30; color:#fff; text-align:center; padding:16px 10px; font-size:19px; font-weight:700; border-radius:12px; line-height:1.5; }
+  #awayHint { margin-top:10px; background:#0a84ff; color:#fff; text-align:center; padding:14px 10px; font-size:17px; font-weight:700; border-radius:12px; line-height:1.6; }
+  #awayHint button { margin-top:8px; font-size:15px; padding:8px 14px; }
   #ended { position:fixed; top:0; right:0; bottom:0; left:0; z-index:30; background:#000; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:12px; text-align:center; padding:24px; font-size:20px; }
   button.danger { background:#5a1d1a; }
   #err { color:#ff6b6b; font-size:13px; white-space:pre-wrap; }
@@ -81,7 +83,8 @@
     <div class="card">
       <div class="player-wrap fs-wrap" id="hostWrap"><div id="hostPlayer"></div><button class="fs-exit" id="hostFsExit">✕ 離開全螢幕</button></div>
       <button class="fs-btn" id="hostFsBtn">⛶ 全螢幕</button>
-      <p class="hint">直接在影片上按播放、暫停、拖進度條，大家的手機都會跟著動。要全螢幕請按上面的「⛶ 全螢幕」（不會暫停）。</p>
+      <div id="awayHint" class="hidden">你剛剛離開時，大家的影片照常在播<br>點一下影片的 ▶ 就會跳到大家的進度<br><button class="secondary" id="awayPause">⏸ 改成大家一起暫停</button></div>
+      <p class="hint">直接在影片上按播放、暫停、拖進度條，大家的手機都會跟著動。切去別的 App 時大家會繼續播，你回來會自動跟上。要全螢幕請按上面的「⛶ 全螢幕」（不會暫停）。</p>
     </div>
   </section>
 
@@ -251,12 +254,56 @@ window.addEventListener('error', e => { const el = document.getElementById('err'
     } catch (e) {}
 
     const pos = makePosEstimator(() => player);
+    // --- 主持人切去別的 App：手機會把主持人的影片暫停，但觀眾照常播（2026-11-13 使用者要求）---
+    // 離開那一刻記下播放位置，離開期間只廣播「照時間推算的位置」，不廣播被手機暫停的狀態；
+    // 回來後跳到推算位置，主持人的影片真的跟上了才恢復正常廣播。
+    let away = null, lastPlay = null, awaySeekAt = 0;
+    const awayTime = () => away.t + (Date.now() - away.ts) / 1000 * away.r;
+    function goAway() {
+      if (away || ended || !player || !videoId || !player.getPlayerState) return;
+      const now = Date.now();
+      if (player.getPlayerState() === 1) away = { v: videoId, t: pos().t, ts: now, r: player.getPlaybackRate() };
+      // 手機可能先暫停影片、才通知網頁離開：1 秒內還在播就算離開時在播
+      else if (lastPlay && lastPlay.v === videoId && now - lastPlay.ts < 1000) away = { v: videoId, t: lastPlay.t + (now - lastPlay.ts) / 1000 * lastPlay.r, ts: now, r: lastPlay.r };
+      else return; // 本來就暫停著＝大家照樣停著
+      sendState();
+    }
+    function comeBack() {
+      if (!away) return;
+      $('awayHint').classList.remove('hidden');
+      try { player.seekTo(awayTime(), true); player.playVideo(); awaySeekAt = Date.now(); } catch (e) {} // iPhone 可能不准網頁替你按播放 → 提示點 ▶
+    }
+    function endAway() { away = null; $('awayHint').classList.add('hidden'); }
+    document.addEventListener('visibilitychange', () => { if (document.hidden) goAway(); else comeBack(); });
+    window.addEventListener('pagehide', goAway);
+    $('awayPause').onclick = () => {
+      if (!away) return;
+      const t = awayTime(); endAway();
+      try { player.pauseVideo(); player.seekTo(t, true); } catch (e) {}
+      net.publish('state', { v: videoId, s: 'pause', t: t, g: true, r: player.getPlaybackRate(), ts: Date.now() }, true);
+    };
+    function sendAway() {
+      const now = Date.now(), dur = player.getDuration ? player.getDuration() : 0;
+      let t = awayTime();
+      const done = dur > 0 && t >= dur - 0.3; // 離開期間影片播完了：大家停在最後
+      if (done) t = dur - 0.3;
+      net.publish('state', { v: away.v, s: done ? 'pause' : 'play', t: t, g: true, r: away.r, ts: now, away: 1 }, true);
+      if (document.hidden) return;
+      // 已經回來：等主持人的影片真的播到大家的位置才恢復正常
+      const st = player.getPlayerState();
+      if (done) { endAway(); try { player.pauseVideo(); player.seekTo(t, true); } catch (e) {} return; }
+      if (st !== 1) return;
+      if (Math.abs(player.getCurrentTime() - t) < 1) { endAway(); return; }
+      if (now - awaySeekAt > 1500) { player.seekTo(t, true); awaySeekAt = now; }
+    }
     function sendState() {
       if (ended) { net.publish('state', { end: true, ts: Date.now() }, true); return; }
       if (!player || !videoId || !player.getCurrentTime) return;
+      if (away && away.v === videoId) { sendAway(); return; }
       const st = player.getPlayerState();
       const playing = st === YT.PlayerState.PLAYING;
       const p = pos();
+      if (playing) lastPlay = { v: videoId, t: p.t, ts: Date.now(), r: player.getPlaybackRate() };
       // 緩衝中＝主持人那邊畫面停住，觀眾也先停在同一格
       net.publish('state', { v: videoId, s: playing ? 'play' : 'pause', t: p.t, g: p.good, r: player.getPlaybackRate(), ts: Date.now() }, true);
     }
@@ -282,7 +329,7 @@ window.addEventListener('error', e => { const el = document.getElementById('err'
       const id = parseVideoId($('url').value);
       if (!id) { alert('看不懂這個連結，請貼 YouTube 影片的網址'); return; }
       if (!player || !player.loadVideoById) { alert('播放器還在準備，請等一下再按'); return; }
-      videoId = id; safeSet('wt_host_video', id);
+      videoId = id; safeSet('wt_host_video', id); endAway();
       player.loadVideoById(id);
       sendState();
     }
@@ -375,7 +422,7 @@ window.addEventListener('error', e => { const el = document.getElementById('err'
     }, 500);
     // 該播卻 2.5 秒都沒前進（不管播放器回報什麼狀態、甚至播放器沒準備好）＝手機擋住了 → 請觀眾直接點影片
     setInterval(() => {
-      if (!state || state.end || !unlocked || state.s !== 'play') { stuckSince = 0; return; }
+      if (!state || state.end || !unlocked || state.s !== 'play' || pastEnd()) { stuckSince = 0; return; }
       // 要「播放器說在播」而且時間真的往前走才算（網頁自己跳轉也會讓時間變，iOS 12 實測被騙過）
       let ct = -1, st = null; try { if (playerReady) { ct = player.getCurrentTime(); st = player.getPlayerState(); } } catch (e) {}
       const now = Date.now();
@@ -400,6 +447,10 @@ window.addEventListener('error', e => { const el = document.getElementById('err'
       $('tapHint').classList.toggle('hidden', !on);
       if (typeof sayHello === 'function') sayHello(); // 馬上讓主持人知道誰在等點擊
     }
+    // 主持人離開期間影片播完（主持人手機睡著沒辦法通知「停在最後」）：推算位置超過片長就讓它停在結尾，不要一直跳
+    function pastEnd() {
+      try { const dur = player.getDuration(); return state.s === 'play' && dur > 0 && wantTime() >= dur - 0.5; } catch (e) { return false; }
+    }
     function nearestRate(target, base) {
       const list = (player.getAvailablePlaybackRates && player.getAvailablePlaybackRates()) || [];
       let best = null;
@@ -417,6 +468,7 @@ window.addEventListener('error', e => { const el = document.getElementById('err'
         if (Math.abs(player.getCurrentTime() - state.t) > 0.04) player.seekTo(state.t, true);
         busyUntil = now + 300; return;
       }
+      if (pastEnd()) return;
       if (directTap) return; // 等觀眾自己點影片；一直跳轉只會讓字幕在跑、畫面卻是黑的（iOS 12 實測）
       if (st !== 1 && st !== 3) { player.seekTo(wantTime() + seekLead, true); player.playVideo(); checkLead = true; busyUntil = now + 1500; seekCount++; return; }
       if (st === 3) return; // 緩衝中

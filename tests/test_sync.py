@@ -123,6 +123,29 @@ async def main():
             H1 = await video(h); await asyncio.sleep(1); H2 = await video(h)
             check("主持人離開全螢幕：影片繼續播沒有暫停", "fs" not in await h.evaluate("document.body.className")
                   and H1 and H2 and not H2["paused"] and H2["t"] > H1["t"] + 0.5)
+            # 主持人切去別的 App（2026-11-13 使用者要求）：手機把主持人的影片暫停，觀眾要照常播；回來自動跟上大家
+            H0 = await video(h)
+            await hf.evaluate("document.querySelector('video').pause()")  # 手機先暫停影片、才通知網頁離開（最難的順序）
+            await h.evaluate("""(()=>{Object.defineProperty(document,'hidden',{configurable:true,get:()=>true});
+              Object.defineProperty(document,'visibilityState',{configurable:true,get:()=>'hidden'});
+              document.dispatchEvent(new Event('visibilitychange'));})()""")
+            await asyncio.sleep(8)
+            Vs = [await video(v) for v in vs]
+            ad = [round((x["t"] - (H0["t"] + (x["at"] - H0["at"]) / 1000)) * 1000) for x in Vs]  # 觀眾 vs 主持人沒離開的話該播到哪
+            check(f"主持人離開：主持人影片停了、觀眾照常播且位置正確（{ad} ms）",
+                  (await video(h))["paused"] and all(not x["paused"] for x in Vs) and all(abs(x) < 300 for x in ad))
+            await h.evaluate("""(()=>{Object.defineProperty(document,'hidden',{configurable:true,get:()=>false});
+              Object.defineProperty(document,'visibilityState',{configurable:true,get:()=>'visible'});
+              document.dispatchEvent(new Event('visibilitychange'));})()""")
+            check("主持人回來：出現「大家照常在播、點 ▶ 跟上」提示", await h.is_visible("#awayHint"))
+            hf = await host_play(h)  # 模擬 iPhone：網頁不准替主持人按播放，主持人自己點 ▶
+            d = await wait_stable(h, vs, 9)
+            check(f"主持人點 ▶ 後跳到大家的進度、提示消失、照常同步（{d}）",
+                  not await h.is_visible("#awayHint") and all(x is not None and abs(x) < TOL_MS for x in d))
+            await hf.evaluate("document.querySelector('video').pause()")
+            await asyncio.sleep(3)
+            check("回來後主持人暫停→觀眾也暫停（恢復正常控制）", all(x and x["paused"] for x in [await video(v) for v in vs]))
+            hf = await host_play(h)
             # 貼進輸入框不會自動開始（貼上跟播放分開），按「播放」才換（換一部影片）
             await h.evaluate("(()=>{const el=document.getElementById('url');el.value='https://www.youtube.com/watch?v=9bZkp7q19f0';el.dispatchEvent(new Event('paste'))})()")
             await asyncio.sleep(2)
