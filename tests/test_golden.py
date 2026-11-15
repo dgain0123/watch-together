@@ -1,15 +1,17 @@
 """golden：把網頁目前「確認正確」的關鍵規格釘住（2026-10-25 使用者要求「釘成 golden」）。
 
-從 index.html／lib／test_sync.py 抽出規格，跟 tests/golden/contract.json 比對，有任何不同就紅。
+從 index.html／lib／test_sync.py／guard_test.py 抽出規格，跟 tests/golden/contract.json 比對，有任何不同就紅。
 - 故意要改規格（使用者新裁示）時：改完程式 → `python3 tests/test_golden.py --update` 重生 → 檢查 diff → 一起 commit。
 - 不准為了讓測試變綠而重生：先想清楚是不是改壞了。
 """
-import hashlib, json, os, re, sys
+import hashlib, importlib.util, json, os, re, sys
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 GOLDEN = os.path.join(ROOT, "tests", "golden", "contract.json")
 html = open(os.path.join(ROOT, "index.html"), encoding="utf-8").read()
 sync_test = open(os.path.join(ROOT, "tests", "test_sync.py"), encoding="utf-8").read()
+_spec = importlib.util.spec_from_file_location("guard_for_golden", os.path.join(ROOT, "tests", "guard_test.py"))
+guard = importlib.util.module_from_spec(_spec); _spec.loader.exec_module(guard)
 
 
 def section(start, end):
@@ -91,6 +93,18 @@ def extract():
         "測試門檻": {
             "同步誤差ms": (re.search(r"^TOL_MS = (\d+)", sync_test, re.M) or [None, None])[1],
             "Safari 同步誤差ms": one(r"Safari 核心的觀眾也同步 < (\d+)ms", sync_test),
+        },
+        "守門與測試": {  # 2026-11-15 守門快取＋縮時：量測條件與快取範圍不准默默變
+            "同步測試檢查項數": len(re.findall(r"^\s+check\(", sync_test, re.M)),
+            "走快取的測試": sorted(guard.SLOW_DEPS),
+            "同步測試不算相依的檔案": sorted(guard.SLOW_DEPS.get("test_sync.py", [])),
+            "任何測試都不讀的檔案": sorted(guard.ALWAYS_SKIP),
+            "擋住觀眾與 Safari 觀眾兩段同時跑": "await asyncio.gather(blocked_viewer(), safari_viewer())" in sync_test,
+            "Safari 加入後等幾秒才量": one(r"asyncio\.sleep\((\d+)\)\s+# 等對時做完", sync_test),
+            "慢 iPhone 先穩幾秒": one(r"asyncio\.sleep\((\d+)\)\s+# 先讓它跳回來", sync_test),
+            "慢 iPhone 觀察幾秒": one(r'seekCount"\); await asyncio\.sleep\((\d+)\)', sync_test),
+            "慢 iPhone 最多跳幾次": one(r"要 ≤ (\d+)）", sync_test),
+            "整體上限秒": one(r"asyncio\.wait_for\(main\(\), (\d+)\)", sync_test),
         },
     }
 

@@ -22,7 +22,7 @@ ALWAYS_SKIP = ["*.pyc", "*.DS_Store", "*.png", "tests/.guard_cache.json"]
 SLOW_DEPS = {
     # 開瀏覽器測同步：讀 index.html、lib/、自己；不讀文件、靜態測試、golden 快照、診斷工具、守門入口
     "test_sync.py": ["*.md", ".gitignore", "tools/*", "tests/guard_test.py", "tests/test_rules.py",
-                     "tests/test_golden.py", "tests/golden/*"],
+                     "tests/test_golden.py", "tests/test_guard.py", "tests/golden/*"],
 }
 
 

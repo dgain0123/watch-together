@@ -5,8 +5,9 @@
 
 - 上線網址：https://dgain0123.github.io/watch-together/ （GitHub Pages，repo `dgain0123/watch-together`，main 分支根目錄）
 - 網頁＝`index.html` 一個檔＋`lib/`（自架的 mqtt 4.3.8、qrcode 1.0.0）。
-- 守門：`python3 tests/guard_test.py`（test_rules＋test_golden＋test_sync，共 96 項；同步測試約 2 分多鐘、要網路）。**全綠才 commit＋push**。
-  - 有快取（11/15）：`index.html`／`lib/`／`test_sync.py` 內容沒變就沿用上次通過的同步測試（2 秒過）；**上線前跑 `--no-cache`**。靜態測試紅了會先略過同步測試。
+- 守門：`python3 tests/guard_test.py`（test_golden＋test_guard＋test_rules＋test_sync，共 130 項；同步測試約 2 分多鐘、要網路）。**全綠才 commit＋push**。
+  - 有快取（11/15）：`index.html`／`lib/`／`test_sync.py` 內容沒變就沿用上次通過的同步測試（2 秒過）；**上線前跑 `--no-cache`**。靜態測試紅了會先略過同步測試。守門本身的規則由 `tests/test_guard.py` 驗（修正紀錄 22）。
+  - ★同步測試不准為了省時間動量測條件（Safari 觀眾加入時機／等待秒數、慢 iPhone 觀察秒數、門檻）——test_rules＋golden「守門與測試」擋著（修正紀錄 23）。
 - 一字捷徑：終端機打 `一起看`。
 
 ## 📁 文件索引
@@ -15,7 +16,7 @@
 | 主持人／觀眾怎麼用、出問題怎麼查、收手機回報、改程式上線 | `使用步驟.md` |
 | 每一個修正的症狀→原因→修法→釘樁（含已取代的做法） | `詳解_修正紀錄.md` |
 | 為什麼 iPhone 不能遠端開聲音（三方會議） | `../AI會議室/記錄/會議_20261025_1749.md` |
-| 關鍵規格快照（按鈕、文字、同步參數、程式庫雜湊、測試門檻） | `tests/golden/contract.json` |
+| 關鍵規格快照（按鈕、文字、同步參數、程式庫雜湊、測試門檻、守門快取範圍與量測條件） | `tests/golden/contract.json` |
 
 ## ★ 現行規則（使用者裁示，改之前先問）
 1. **觀眾一律靜音，不提供聲音**（10/25 晚）。沒有任何開聲音的按鈕；觀眾掃了自動靜音播放，不用按任何東西。

@@ -65,4 +65,18 @@ check("診斷工具用自架 mqtt 程式庫", "mqtt-4.3.8.min.js" in tool and "u
 check("觀眾會回報狀態給診斷工具（含最近 10 秒紀錄）", "net.publish('diag'" in html and "trail: trail.slice()" in html)
 # 觀眾一開頁就報到會碰到還沒建立的變數（TDZ）→ 第一次報到要延後
 check("觀眾第一次報到延後（避免變數還沒建立）", "setTimeout(sayHello," in html)
+# ---- 2026-11-15 守門快取＋同步測試縮時＋清殘留（修正紀錄第八節；守門本身的行為由 test_guard.py 驗）----
+check("網頁沒有已拿掉的殘留（#tap 樣式、unlocked、lowPower）", not re.search(r"#tap[ ,{]", css) and "unlocked" not in html and "lowPower" not in html)
+# 縮時不准動到量測條件：Safari 觀眾提早加入會量到跳轉門檻放寬期（127ms 變紅），試過退掉
+sync = open(os.path.join(ROOT, "tests", "test_sync.py"), encoding="utf-8").read()
+i_change, i_goto = sync.find('check("按播放才換影片，觀眾跟著換"'), sync.find("await wv.goto(")
+i_safari, i_slow = sync.find('check(f"Safari 核心的觀眾也同步'), sync.find('check(f"慢 iPhone')
+check("Safari 觀眾只加入一次、而且在換片之後才加入（不准提早加入省時間）", sync.count("wv.goto(") == 1 and 0 < i_change < i_goto < i_safari)
+check("Safari 觀眾加入後等對時做完（4＋16 秒）才量同步", "asyncio.sleep(4)" in sync[i_goto:i_safari] and "asyncio.sleep(16)" in sync[i_goto:i_safari])
+check("慢 iPhone：先穩 12 秒、再觀察 20 秒、最多跳 2 次", 0 < i_safari < i_slow and "asyncio.sleep(12)" in sync[i_safari:i_slow]
+      and "asyncio.sleep(20)" in sync[i_safari:i_slow] and "n <= 2)" in sync[i_slow:i_slow + 200])
+steps = open(os.path.join(ROOT, "使用步驟.md"), encoding="utf-8").read()
+claude = open(os.path.join(ROOT, "CLAUDE.md"), encoding="utf-8").read()
+check("文件寫明上線前 --no-cache、測試核心被清掉怎麼裝回", "--no-cache" in claude and "guard_test.py --no-cache" in steps
+      and "playwright install chromium-headless-shell webkit" in steps)
 sys.exit(1 if fails else 0)

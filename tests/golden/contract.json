@@ -102,5 +102,33 @@
   "測試門檻": {
     "同步誤差ms": "80",
     "Safari 同步誤差ms": "100"
+  },
+  "守門與測試": {
+    "同步測試檢查項數": 26,
+    "走快取的測試": [
+      "test_sync.py"
+    ],
+    "同步測試不算相依的檔案": [
+      "*.md",
+      ".gitignore",
+      "tests/golden/*",
+      "tests/guard_test.py",
+      "tests/test_golden.py",
+      "tests/test_guard.py",
+      "tests/test_rules.py",
+      "tools/*"
+    ],
+    "任何測試都不讀的檔案": [
+      "*.DS_Store",
+      "*.png",
+      "*.pyc",
+      "tests/.guard_cache.json"
+    ],
+    "擋住觀眾與 Safari 觀眾兩段同時跑": true,
+    "Safari 加入後等幾秒才量": "16",
+    "慢 iPhone 先穩幾秒": "12",
+    "慢 iPhone 觀察幾秒": "20",
+    "慢 iPhone 最多跳幾次": "2",
+    "整體上限秒": "300"
   }
 }
