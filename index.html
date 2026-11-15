@@ -32,8 +32,6 @@
   .status { font-size:14px; color:var(--muted); margin:8px 0 0; }
   .status b { color:var(--ok); font-weight:600; }
   .hint { font-size:13px; color:var(--muted); line-height:1.6; }
-  #tap { position:fixed; top:0; right:0; bottom:0; left:0; z-index:10; background:rgba(0,0,0,.85); display:flex; flex-direction:column; align-items:center; justify-content:center; gap:16px; text-align:center; padding:24px; }
-  #tap button { font-size:22px; padding:18px 32px; border-radius:16px; }
   .hidden { display:none !important; }
   .shield.off { display:none; }
   #tapHint { margin-top:10px; background:#ff3b30; color:#fff; text-align:center; padding:16px 10px; font-size:19px; font-weight:700; border-radius:12px; line-height:1.5; }
@@ -101,7 +99,6 @@
   <div>主持人已結束放映</div>
   <div class="hint">可以關掉這個網頁了。下次放映請重新掃主持人的新 QR code。</div>
 </div>
-
 
 <script src="lib/mqtt-4.3.8.min.js"></script>
 <script src="lib/qrcode-1.0.0.min.js"></script>
@@ -208,7 +205,6 @@ window.addEventListener('error', e => { const el = document.getElementById('err'
       try { await navigator.clipboard.writeText(joinUrl); $('copy').textContent = '已複製'; } catch (e) { prompt('複製這個連結', joinUrl); }
       setTimeout(() => $('copy').textContent = '複製連結', 1500);
     };
-
 
     const viewers = new Map(); // 觀眾 id → 最後回報時間
     let player = null, videoId = null;
@@ -319,7 +315,7 @@ window.addEventListener('error', e => { const el = document.getElementById('err'
     $('viewer').classList.remove('hidden');
     const myId = randId(8);
     // 2026-10-25 使用者裁示：觀眾一律靜音（不提供開聲音）。手機允許靜音影片自動播放，所以觀眾不用按任何東西
-    let player = null, playerReady = false, unlocked = true, state = null, lastTs = 0;
+    let player = null, playerReady = false, state = null, lastTs = 0;
 
     // --- 對時：問主持人「你現在幾點」，取來回最快的那次算時鐘差 ---
     const pongs = [];
@@ -369,7 +365,7 @@ window.addEventListener('error', e => { const el = document.getElementById('err'
       }
       if (!state || !playerReady || loadedId === state.v) return;
       loadedId = state.v;
-      if (unlocked) player.loadVideoById(state.v, wantTime()); else player.cueVideoById(state.v, wantTime());
+      player.loadVideoById(state.v, wantTime());
     }
 
     // --- 每 0.2 秒校正一次：差很多就跳過去，差一點就微調速度追上 ---
@@ -387,7 +383,7 @@ window.addEventListener('error', e => { const el = document.getElementById('err'
     }, 500);
     // 該播卻 2.5 秒都沒前進（不管播放器回報什麼狀態、甚至播放器沒準備好）＝手機擋住了 → 請觀眾直接點影片
     setInterval(() => {
-      if (!state || state.end || !unlocked || state.s !== 'play') { stuckSince = 0; return; }
+      if (!state || state.end || state.s !== 'play') { stuckSince = 0; return; }
       // 要「播放器說在播」而且時間真的往前走才算（網頁自己跳轉也會讓時間變，iOS 12 實測被騙過）
       let ct = -1, st = null; try { if (playerReady) { ct = player.getCurrentTime(); st = player.getPlayerState(); } } catch (e) {}
       const now = Date.now();
@@ -405,7 +401,6 @@ window.addEventListener('error', e => { const el = document.getElementById('err'
     let seekTimes = [], wantJump = 0, lastJumpAt = null; // 最近的跳轉時刻、連續幾次超過門檻、目前門檻（回報用）
     function setDirectTap(on) {
       directTap = on;
-      // iOS：網頁替觀眾開聲音時會把影片暫停，要觀眾自己點影片才能有聲音播放
       // 靜音影片手機通常會自己播；iPhone 省電模式等情況擋住時才請觀眾點 YouTube 自己的 ▶（點我們網頁不算）
       $('tapHint').innerHTML = '👆 影片沒有自動開始<br>請點一下上面影片中間的 ▶ 播放鍵';
       $('shield').classList.toggle('off', on);
@@ -419,7 +414,7 @@ window.addEventListener('error', e => { const el = document.getElementById('err'
       return best;
     }
     setInterval(() => {
-      if (!state || state.end || !playerReady || !unlocked || loadedId !== state.v) return;
+      if (!state || state.end || !playerReady || loadedId !== state.v) return;
       const now = Date.now(), base = state.r || 1;
       if (correcting || now < busyUntil) return;
       if (player.getPlaybackRate() !== base) { player.setPlaybackRate(base); busyUntil = now + 900; return; }
@@ -485,7 +480,6 @@ window.addEventListener('error', e => { const el = document.getElementById('err'
         shieldOff: $('shield').classList.contains('off'),
         trail: trail.slice(), events: stateEvents.slice(), conns: net.connectedCount(), seeks: seekCount, rateWorks: rateWorks, jumpAt: lastJumpAt,
         errs: window.__errs, yt: typeof YT, iframe: !!document.querySelector('#viewerWrap iframe'),
-        lowPower: null,
       });
     }, 2000);
 
@@ -505,7 +499,6 @@ window.addEventListener('error', e => { const el = document.getElementById('err'
     });
 
     setupFullscreen($('viewerWrap'), $('fsBtn'), $('fsExit'));
-
   }
 
   // ---------- 入口 ----------

@@ -5,7 +5,8 @@
 
 - 上線網址：https://dgain0123.github.io/watch-together/ （GitHub Pages，repo `dgain0123/watch-together`，main 分支根目錄）
 - 網頁＝`index.html` 一個檔＋`lib/`（自架的 mqtt 4.3.8、qrcode 1.0.0）。
-- 守門：`python3 tests/guard_test.py`（test_rules＋test_golden＋test_sync，約 3～4 分鐘、要網路）。**全綠才 commit＋push**。
+- 守門：`python3 tests/guard_test.py`（test_rules＋test_golden＋test_sync，共 96 項；同步測試約 2 分多鐘、要網路）。**全綠才 commit＋push**。
+  - 有快取（11/15）：`index.html`／`lib/`／`test_sync.py` 內容沒變就沿用上次通過的同步測試（2 秒過）；**上線前跑 `--no-cache`**。靜態測試紅了會先略過同步測試。
 - 一字捷徑：終端機打 `一起看`。
 
 ## 📁 文件索引

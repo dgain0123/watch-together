@@ -1,5 +1,8 @@
 """實際開瀏覽器測：一台主持人＋兩台觀眾（時鐘故意調快 3 秒、調慢 1.7 秒），量同步誤差。
-需要網路（YouTube＋公開訊息伺服器）。約 60 秒。"""
+需要網路（YouTube＋公開訊息伺服器）。約 2.5 分鐘。
+★縮時（2026-11-15）：「播放被手機擋住」那段跟「Safari 核心觀眾」那段互不相干、同時跑。檢查項目與門檻都沒變。
+  試過但退掉：Safari 觀眾提早跟 Android 觀眾一起加入（省 30 秒）→ 剛加入、剛換片時跳轉門檻還在放寬期，
+  量到 127ms（門檻 100）、慢 iPhone 也變成貼上限的 2 次。Safari 那段要維持「加入後 20 秒不被打擾才量」。"""
 import asyncio, os, random, socket, subprocess, sys, time
 from playwright.async_api import async_playwright
 
@@ -55,11 +58,14 @@ async def main():
     port = free_port()
     srv = subprocess.Popen([sys.executable, "-m", "http.server", str(port)], cwd=ROOT,
                            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-    time.sleep(1)
+    for _ in range(50):  # 等本機網頁伺服器起來（通常 0.2 秒內）
+        try: socket.create_connection(("127.0.0.1", port), 0.2).close(); break
+        except OSError: time.sleep(0.1)
     U, room = f"http://localhost:{port}/", "t" + str(random.randint(10**5, 10**6))
     try:
         async with async_playwright() as pw:
-            b = await pw.chromium.launch()  # 預設自動播放規則＝跟手機一樣，沒點過只能靜音播
+            # 預設自動播放規則＝跟手機一樣，沒點過只能靜音播；Safari 核心先一起開好
+            b, wb = await asyncio.gather(pw.chromium.launch(), pw.webkit.launch())
             mob = {k: v for k, v in pw.devices["iPhone 13"].items() if k != "default_browser_type"}
             andr = {k: v for k, v in pw.devices["Pixel 5"].items() if k != "default_browser_type"}  # Chrome 觀眾＝Android 流程
             h = await (await b.new_context(**mob)).new_page()
@@ -150,62 +156,66 @@ async def main():
                 d2 = [await f.evaluate("(()=>{const v=document.querySelector('video');return v?v.duration:0})()") for f in vs[1].frames if "youtube.com/embed" in f.url]
                 if d2 and 240 < d2[0] < 260: ok = True; break
             check("按播放才換影片，觀眾跟著換", ok)
-            # iPhone 擋住網頁替觀眾按播放 → 拿掉遮罩、提示觀眾直接點影片；點了之後照常同步
-            bp = await (await b.new_context(**andr)).new_page()
-            await bp.goto(U + "?room=" + room, wait_until="domcontentloaded")
-            await asyncio.sleep(4)
-            # 模擬 iOS 12 實測：叫播放沒反應、播放器一直「還沒開始」，但跳轉會讓時間數字跟著變
-            await bp.evaluate("""(()=>{const p=__wt.player; window.__o=[p.playVideo,p.seekTo,p.getCurrentTime,p.getPlayerState];
-              let fake=0; p.playVideo=()=>{}; p.seekTo=(t)=>{fake=t}; p.getCurrentTime=()=>fake; p.getPlayerState=()=>-1;})()""")
-            for f in bp.frames:  # 真實情況是影片根本沒開始播：把已經在播的影片真的停住
-                if "youtube.com/embed" in f.url:
-                    await f.evaluate("(()=>{const v=document.querySelector('video'); if(v) v.pause();})()")
-            ok = False
-            for _ in range(16):
-                await asyncio.sleep(0.5)
-                if await bp.is_visible("#tapHint"): ok = True; break
-            check("播放被手機擋住→出現「請直接點一下影片」且遮罩拿掉", ok and not await bp.is_visible("#shield"))
-            await bp.evaluate("(()=>{const p=__wt.player; p.playVideo=__o[0]; p.seekTo=__o[1]; p.getCurrentTime=__o[2]; p.getPlayerState=__o[3];})()")
-            await bp.click("#viewerWrap")  # 觀眾用手指點影片正中間
-            for _ in range(20):
-                B = await video(bp)
-                if B and not B["paused"] and B["t"] > 0: break
-                await asyncio.sleep(0.5)
-            await asyncio.sleep(5)
-            dd = await median_diff(h, bp)
-            if dd is None or abs(dd) >= TOL_MS:
-                print("  被擋觀眾診斷:", await bp.is_visible("#tapHint"), await bp.is_visible("#shield"), await video(bp),
-                      await bp.evaluate("(()=>{const p=__wt.player;return {st:p.getPlayerState(),ct:p.getCurrentTime(),dt:__wt.directTap}})()"))
-            check(f"觀眾自己點影片後遮罩蓋回、照常同步（{dd}）", not await bp.is_visible("#tapHint") and await bp.is_visible("#shield") and dd is not None and abs(dd) < TOL_MS)
-
-            # Safari 核心的觀眾（改速度沒效果的那種）也要對得上
-            wb = await pw.webkit.launch()
+            # ↓ 這兩段互不相干（各看各的觀眾、都只讀主持人），同時跑
             wv = await (await wb.new_context(**mob)).new_page()
-            await wv.goto(U + "?room=" + room, wait_until="domcontentloaded"); await asyncio.sleep(4)
-            # iPhone（Safari 核心）也不用點就自動靜音播放
-            ok = False
-            for _ in range(20):
-                V = await video(wv)
-                if V and not V["paused"] and V["t"] > 0: ok = True; break
-                await asyncio.sleep(0.5)
-            check("iPhone 觀眾不用點就自動開始、靜音、沒有紅框", ok and V["muted"] and not await wv.is_visible("#tapHint"))
-            await asyncio.sleep(16)  # 等對時做完（前 15 秒每秒一次）再量
-            dw = await median_diff(h, wv)
-            if dw is None or abs(dw) >= 100:
-                print("  Safari 觀眾診斷:", await video(wv), await video(h), await wv.inner_text("#viewerStatus"), await wv.inner_text("#err"),
-                      await wv.evaluate("(()=>{const p=__wt.player;return p&&p.getPlayerState?{st:p.getPlayerState(),ct:p.getCurrentTime(),rw:__wt.rateWorks,dt:__wt.directTap}:null})()"), )
-            # Safari 只能用跳轉校正（差 0.08 秒以上才跳，太常跳畫面會頓），所以標準放 0.1 秒
-            check(f"Safari 核心的觀眾也同步 < 100ms（{dw}）", dw is not None and abs(dw) < 100)
+            async def blocked_viewer():
+                # iPhone 擋住網頁替觀眾按播放 → 拿掉遮罩、提示觀眾直接點影片；點了之後照常同步
+                bp = await (await b.new_context(**andr)).new_page()
+                await bp.goto(U + "?room=" + room, wait_until="domcontentloaded")
+                await asyncio.sleep(4)
+                # 模擬 iOS 12 實測：叫播放沒反應、播放器一直「還沒開始」，但跳轉會讓時間數字跟著變
+                await bp.evaluate("""(()=>{const p=__wt.player; window.__o=[p.playVideo,p.seekTo,p.getCurrentTime,p.getPlayerState];
+                  let fake=0; p.playVideo=()=>{}; p.seekTo=(t)=>{fake=t}; p.getCurrentTime=()=>fake; p.getPlayerState=()=>-1;})()""")
+                for f in bp.frames:  # 真實情況是影片根本沒開始播：把已經在播的影片真的停住
+                    if "youtube.com/embed" in f.url:
+                        await f.evaluate("(()=>{const v=document.querySelector('video'); if(v) v.pause();})()")
+                ok = False
+                for _ in range(16):
+                    await asyncio.sleep(0.5)
+                    if await bp.is_visible("#tapHint"): ok = True; break
+                check("播放被手機擋住→出現「請直接點一下影片」且遮罩拿掉", ok and not await bp.is_visible("#shield"))
+                await bp.evaluate("(()=>{const p=__wt.player; p.playVideo=__o[0]; p.seekTo=__o[1]; p.getCurrentTime=__o[2]; p.getPlayerState=__o[3];})()")
+                await bp.click("#viewerWrap")  # 觀眾用手指點影片正中間
+                for _ in range(20):
+                    B = await video(bp)
+                    if B and not B["paused"] and B["t"] > 0: break
+                    await asyncio.sleep(0.5)
+                await asyncio.sleep(5)
+                dd = await median_diff(h, bp)
+                if dd is None or abs(dd) >= TOL_MS:
+                    print("  被擋觀眾診斷:", await bp.is_visible("#tapHint"), await bp.is_visible("#shield"), await video(bp),
+                          await bp.evaluate("(()=>{const p=__wt.player;return {st:p.getPlayerState(),ct:p.getCurrentTime(),dt:__wt.directTap}})()"))
+                check(f"觀眾自己點影片後遮罩蓋回、照常同步（{dd}）", not await bp.is_visible("#tapHint") and await bp.is_visible("#shield") and dd is not None and abs(dd) < TOL_MS)
 
-            # 慢的 iPhone：每次跳轉落點都不準（重新讀取花的時間不固定）→ 不能一直跳（一直跳＝畫面一直出現紅色讀取條、一頓一頓，10/27 放映回報）
-            await wv.evaluate("""(()=>{const p=__wt.player; window.__os=p.seekTo.bind(p);
-              p.seekTo=(t,a)=>window.__os(t+(Math.random()*0.6-0.3),a);
-              window.__os(p.getCurrentTime()+1.5,true);})()""")  # 先推離 1.5 秒，讓它開始跳
-            await asyncio.sleep(12)  # 先讓它跳回來、穩下來
-            s0 = await wv.evaluate("__wt.seekCount"); await asyncio.sleep(20)
-            n = await wv.evaluate("__wt.seekCount") - s0
-            check(f"慢 iPhone 跳轉落點不準時不會一直跳（穩下來後 20 秒跳 {n} 次，要 ≤ 2）", n <= 2)
-            await wv.evaluate("(()=>{__wt.player.seekTo=window.__os;})()")
+            async def safari_viewer():
+                # Safari 核心的觀眾（改速度沒效果的那種）也要對得上
+                await wv.goto(U + "?room=" + room, wait_until="domcontentloaded"); await asyncio.sleep(4)
+                # iPhone（Safari 核心）也不用點就自動靜音播放
+                ok = False
+                for _ in range(20):
+                    V = await video(wv)
+                    if V and not V["paused"] and V["t"] > 0: ok = True; break
+                    await asyncio.sleep(0.5)
+                check("iPhone 觀眾不用點就自動開始、靜音、沒有紅框", ok and V["muted"] and not await wv.is_visible("#tapHint"))
+                await asyncio.sleep(16)  # 等對時做完（前 15 秒每秒一次）再量
+                dw = await median_diff(h, wv)
+                if dw is None or abs(dw) >= 100:
+                    print("  Safari 觀眾診斷:", await video(wv), await video(h), await wv.inner_text("#viewerStatus"), await wv.inner_text("#err"),
+                          await wv.evaluate("(()=>{const p=__wt.player;return p&&p.getPlayerState?{st:p.getPlayerState(),ct:p.getCurrentTime(),rw:__wt.rateWorks,dt:__wt.directTap}:null})()"), )
+                # Safari 只能用跳轉校正（差 0.08 秒以上才跳，太常跳畫面會頓），所以標準放 0.1 秒
+                check(f"Safari 核心的觀眾也同步 < 100ms（{dw}）", dw is not None and abs(dw) < 100)
+
+                # 慢的 iPhone：每次跳轉落點都不準（重新讀取花的時間不固定）→ 不能一直跳（一直跳＝畫面一直出現紅色讀取條、一頓一頓，10/27 放映回報）
+                await wv.evaluate("""(()=>{const p=__wt.player; window.__os=p.seekTo.bind(p);
+                  p.seekTo=(t,a)=>window.__os(t+(Math.random()*0.6-0.3),a);
+                  window.__os(p.getCurrentTime()+1.5,true);})()""")  # 先推離 1.5 秒，讓它開始跳
+                await asyncio.sleep(12)  # 先讓它跳回來、穩下來
+                s0 = await wv.evaluate("__wt.seekCount"); await asyncio.sleep(20)
+                n = await wv.evaluate("__wt.seekCount") - s0
+                check(f"慢 iPhone 跳轉落點不準時不會一直跳（穩下來後 20 秒跳 {n} 次，要 ≤ 2）", n <= 2)
+                await wv.evaluate("(()=>{__wt.player.seekTo=window.__os;})()")
+
+            await asyncio.gather(blocked_viewer(), safari_viewer())
 
             # 結束放映＝全部失效：觀眾停止並斷線、舊 QR code 作廢、主持人換新 QR code
             await h.click("#endShow")
