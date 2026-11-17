@@ -1,0 +1,7 @@
+{
+  "說明": "改壞測試設定。引擎與說明在 ~/.claude/tools/mutation/ 與 ~/.claude/改壞測試.md。只改 Python（tools/）；網頁本體 index.html 目前不在範圍。test_sync.py 會開瀏覽器連 YouTube 與訊息伺服器，改壞測試不拿它驗。",
+  "runner": "script",
+  "targets": ["tools/*.py"],
+  "exclude_tests": ["test_sync.py"],
+  "jobs": 1
+}
